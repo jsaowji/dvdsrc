@@ -1,0 +1,12 @@
+src/bindings/*.zig
+zig-cache/
+zig-out/
+.vspreview
+*.d2v
+*.m2v
+*.y4m
+*.lwi
+*.txt
+*.py
+*.bin
+*.zst
