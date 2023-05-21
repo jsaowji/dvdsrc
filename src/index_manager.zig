@@ -1,4 +1,5 @@
 const std = @import("std");
+const utils = @import("utils.zig");
 
 const mm = std.heap.c_allocator;
 
@@ -84,17 +85,31 @@ pub const IndexManager = struct {
     }
 
     pub fn getMainFolder() !std.fs.Dir {
-        const home = std.os.getenv("HOME").?;
-
-        const paths = &[_][]const u8{
-            home,
-            ".cache",
-            "dvdsrc",
-        };
-
-        const fullpath = try std.fs.path.join(mm, paths);
+        var fullpath: []u8 = undefined;
         defer mm.free(fullpath);
 
+        if (utils.is_windows) {
+            const home = try std.process.getEnvVarOwned(mm, "userprofile");
+            defer mm.free(home);
+
+            const paths = &[_][]const u8{
+                home,
+                ".vsdvdsrc",
+            };
+
+            fullpath = try std.fs.path.join(mm, paths);
+        } else {
+            const home = try std.process.getEnvVarOwned(mm, "HOME");
+            defer mm.free(home);
+
+            const paths = &[_][]const u8{
+                home,
+                ".cache",
+                "dvdsrc",
+            };
+
+            fullpath = try std.fs.path.join(mm, paths);
+        }
         _ = try checkCreateFolder(fullpath);
 
         var dir = std.fs.openDirAbsolute(fullpath, .{}) catch unreachable;

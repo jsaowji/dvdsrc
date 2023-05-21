@@ -2,6 +2,8 @@ const std = @import("std");
 
 const mpeg2 = @import("./bindings/mpeg2.zig");
 
+pub const is_windows = @import("builtin").os.tag == .windows;
+
 const CheckStartCodeError = error{
     not4,
     not001,

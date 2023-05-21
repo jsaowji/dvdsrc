@@ -29,9 +29,15 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
     lib.linkLibC();
-    lib.linkSystemLibraryName("dvdread");
-    lib.linkSystemLibraryName("mpeg2");
+    if (!target.isWindows()) {
+        lib.linkSystemLibraryName("dvdread");
+        lib.linkSystemLibraryName("mpeg2");
+    } else {
+        lib.addObjectFile("./libdvdread.a");
+        lib.addObjectFile("./libmpeg2.a");
+    }
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

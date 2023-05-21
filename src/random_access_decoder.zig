@@ -170,6 +170,13 @@ pub const RandomAccessDecoder = struct {
             std.debug.assert(!flush_current);
             std.debug.assert(need_new_data);
 
+            //Crashes if default
+            //4x perforance penalty though
+            //TODO: COPYPASTE
+            if (utils.is_windows) {
+                _ = mpeg2.mpeg2_accel(0);
+            }
+
             var decoder = mpeg2.mpeg2_init().?;
 
             var has_prev_gop = false;

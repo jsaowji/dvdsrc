@@ -51,6 +51,12 @@ pub fn MakeIndexer(comptime gopbuf_writer: anytype) type {
             var psindex = ps_index.PsIndex{};
             psindex.indexs = std.ArrayList(ps_index.IndexEntry).init(std.heap.c_allocator);
 
+            //Crashes if default
+            //4x perforance penalty though
+            //TODO: COPYPASTE
+            if (utils.is_windows) {
+                _ = mpeg2.mpeg2_accel(0);
+            }
             var slf = Self{
                 .dvd_reader = rdd,
                 .mpeg2dec = mpeg2.mpeg2_init().?,
