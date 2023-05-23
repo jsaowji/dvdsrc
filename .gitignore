@@ -10,3 +10,4 @@ zig-out/
 *.py
 *.bin
 *.zst
+*.a

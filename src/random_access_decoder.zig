@@ -30,6 +30,7 @@ pub const RandomAccessDecoder = struct {
     video_info: vs.VSVideoInfo,
 
     decoder_state: ?struct {
+        const DecoderSelf = @This();
         decoder: *mpeg2.mpeg2dec_t,
         slice_cnt: u8,
         gop: usize,
@@ -39,12 +40,36 @@ pub const RandomAccessDecoder = struct {
             temporal: u8,
         },
         has_prev_gop: bool,
+
+        fn deinit(
+            self: *DecoderSelf,
+            vsapi: [*c]const vs.VSAPI,
+        ) void {
+            self.freeFrames(vsapi);
+        }
+
+        fn freeFrames(
+            self: *DecoderSelf,
+            vsapi: [*c]const vs.VSAPI,
+        ) void {
+            for (0..self.cache.len) |i| {
+                if (self.cache[i] != null) {
+                    vsapi.*.freeFrame.?(self.cache[i].?.frame);
+                }
+            }
+        }
     },
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(
+        self: *Self,
+        vsapi: [*c]const vs.VSAPI,
+    ) void {
         self.goplookup.deinit();
         self.gops.deinit();
         self.m2v.deinit();
+        if (self.decoder_state != null) {
+            self.decoder_state.?.deinit(vsapi);
+        }
     }
 
     pub fn fetchFrame(self: *Self, n_display_order: u64) *vs.VSFrame {
@@ -149,11 +174,8 @@ pub const RandomAccessDecoder = struct {
 
         if (flush_current) {
             var ds = &self.decoder_state.?;
-
+            ds.freeFrames(vsapi);
             for (0..ds.cache.len) |i| {
-                if (ds.cache[i] != null) {
-                    vsapi.*.freeFrame.?(ds.cache[i].?.frame);
-                }
                 ds.cache[i] = null;
             }
 
@@ -211,13 +233,11 @@ pub const RandomAccessDecoder = struct {
 
             //Free old decoder
             if (self.decoder_state != null) {
-                mpeg2.mpeg2_close(self.decoder_state.?.decoder);
-                mm.free(self.decoder_state.?.buf);
-                for (self.decoder_state.?.cache) |cc| {
-                    if (cc != null) {
-                        vsapi.*.freeFrame.?(cc.?.frame);
-                    }
-                }
+                var ds = &self.decoder_state.?;
+                mpeg2.mpeg2_close(ds.decoder);
+                mm.free(ds.buf);
+
+                ds.freeFrames(vsapi);
             }
 
             self.decoder_state = .{

@@ -233,7 +233,12 @@ pub fn MakeIndexer(comptime gopbuf_writer: anytype) type {
                 var end_pos = self.cnting_reader.bytes_read;
 
                 const current_unwritten_size = self.mpeg2_file_pos - self.psindex_last_mpeg2pos;
-                if (should_stop or (current_unwritten_size >= 1024 * 1024 * 10)) {
+
+                //This controlls how large the ps_index file gets
+                //settings this too large makes playback stutter because reads take long
+                const INDEX_CHUNK_SIZE = 1024 * 1024 * 3;
+
+                if (should_stop or (current_unwritten_size >= INDEX_CHUNK_SIZE)) {
                     var startpos: u64 = 0;
                     if (self.psindex.indexs.getLastOrNull()) |last| {
                         startpos = last.in_end;
@@ -259,13 +264,22 @@ pub fn MakeIndexer(comptime gopbuf_writer: anytype) type {
 const index_manager = @import("index_manager.zig");
 const dvdread = @import("./bindings/dvdread.zig");
 
+pub const IndexingError = error{ dvdopen, fileopen };
+
 pub fn doIndexing(dvds: [*c]const u8, ii: index_manager.IndexInfo) !void {
     var index_folder = try index_manager.IndexManager.getIndexFolder(ii);
 
     var dvd_r = dvdread.DVDOpen(dvds);
+    if (dvd_r == null) {
+        return IndexingError.dvdopen;
+    }
+
     defer dvdread.DVDClose(dvd_r);
 
     var file = dvdread.DVDOpenFile(@ptrCast(*dvdread.dvd_reader_t, dvd_r), ii.mode.full.vts, indexManagerDomainToDvdDomain(ii.mode.full.domain));
+    if (file == null) {
+        return IndexingError.fileopen;
+    }
     defer dvdread.DVDCloseFile(file);
 
     var gop_index = try index_folder.dir.createFile("gops.bin", .{});

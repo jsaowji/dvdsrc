@@ -53,10 +53,13 @@ const FilterData = struct {
         };
     }
 
-    fn deinit(self: *Self) void {
+    fn deinit(
+        self: *Self,
+        vsapi: [*c]const vs.VSAPI,
+    ) void {
         dvdread.DVDCloseFile(self.file);
         dvdread.DVDClose(self.dvd_r);
-        self.randy.deinit();
+        self.randy.deinit(vsapi);
     }
 };
 
@@ -74,9 +77,8 @@ export fn filterGetFrame(n: c_int, activationReason: c_int, instanceData: ?*anyo
 
 export fn filterFree(instanceData: ?*anyopaque, core: ?*vs.VSCore, vsapi: [*c]const vs.VSAPI) void {
     _ = core;
-    _ = vsapi;
     var d = @ptrCast(*FilterData, @alignCast(std.meta.alignment(*FilterData), instanceData));
-    d.deinit();
+    d.deinit(vsapi);
 
     mm.destroy(d);
     std.debug.print("filterFree\n", .{});
@@ -93,8 +95,11 @@ export fn filterCreate(in: ?*const vs.VSMap, out: ?*vs.VSMap, userData: ?*anyopa
 
     if (domain == 0) {
         ii_domain = .menuvob;
-    } else {
+    } else if (domain == 1) {
         ii_domain = .titlevobs;
+    } else {
+        vsapi.*.mapSetError.?(out, "dvdsrc: domain only supported 0 menuvob 1 titlevob");
+        return;
     }
 
     var idxnfo = index_manager.IndexInfo.init(dvd, index_manager.ModeInfo{
@@ -124,7 +129,22 @@ export fn filterCreate(in: ?*const vs.VSMap, out: ?*vs.VSMap, userData: ?*anyopa
     };
 
     if (need_indexing) {
-        indexer.doIndexing(dvd, idxnfo) catch unreachable;
+        indexer.doIndexing(dvd, idxnfo) catch |e| {
+            switch (e) {
+                indexer.IndexingError.fileopen => {
+                    vsapi.*.mapSetError.?(out, "dvdsrc: fileopen error, does vts exist?");
+                    return;
+                },
+                indexer.IndexingError.dvdopen => {
+                    vsapi.*.mapSetError.?(out, "dvdsrc: dvdopen error, does it exist?");
+                    return;
+                },
+                else => {
+                    vsapi.*.mapSetError.?(out, "dvdsrc: could not index unk error");
+                    return;
+                },
+            }
+        };
     }
 
     var seq_file = idxf.dir.openFile("sequence.bin", .{}) catch unreachable;
@@ -163,7 +183,6 @@ export fn filterCreate(in: ?*const vs.VSMap, out: ?*vs.VSMap, userData: ?*anyopa
         gop_cnt += 1;
     }
 
-    //No idea what this is about
     const gcd = std.math.gcd(27000000, seq.frame_period);
 
     var vi = vs.VSVideoInfo{
