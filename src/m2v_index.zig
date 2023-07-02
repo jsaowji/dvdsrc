@@ -56,10 +56,12 @@ pub const Frame = struct {
 
     frametype: FrameType = FrameType.I,
     decodable_wo_prev_gop: bool = false,
+    temporal_reference: u8 = 255,
+    real_temporal_reference: u8 = 255,
+
     tff: bool = false,
     repeat: bool = false,
     progressive: bool = false,
-    temporal_reference: u8 = 255,
 
     pub fn writeOut(self: *const Self, r: anytype) !void {
         var bw = std.io.bitWriter(std.builtin.Endian.Little, r);
@@ -87,6 +89,7 @@ pub const Frame = struct {
         try bw.writeBits(@as(u8, 0), 2); //padd to 8
 
         try bw.writeBits(self.temporal_reference, 8);
+        try bw.writeBits(self.real_temporal_reference, 8);
         try bw.flushBits();
     }
 
@@ -107,6 +110,7 @@ pub const Frame = struct {
         _ = try br.readBitsNoEof(u8, 2);
 
         self.temporal_reference = try br.readBitsNoEof(u8, 8);
+        self.real_temporal_reference = try br.readBitsNoEof(u8, 8);
 
         return self;
     }
@@ -148,5 +152,79 @@ pub const OutGopInfo = struct {
         }
 
         return self;
+    }
+};
+
+pub const GopLookupEntry = struct {
+    gop: u32 = 0,
+    decode_frame_offset: u8 = 0,
+    gop_framestart: u32 = 0,
+};
+
+/// Contains list of OutGopInfo and fast lookup and statics that can be computed from the gops
+pub const GopLookup = struct {
+    const Self = @This();
+
+    gops: std.ArrayList(OutGopInfo),
+    lookuptable: std.ArrayList(GopLookupEntry),
+    total_frame_cnt: c_int,
+    framestats: struct {
+        prog: u64,
+        tff: u64,
+        rff: u64,
+    },
+
+    pub fn deinit(self: *Self) void {
+        self.gops.deinit();
+        self.lookuptable.deinit();
+    }
+
+    pub fn init(mm: std.mem.Allocator, gop_rd: anytype) !GopLookup {
+        var arl = std.ArrayList(OutGopInfo).init(mm);
+        var framegoplookup = std.ArrayList(GopLookupEntry).init(mm);
+        var total_frame_cnt: c_int = 0;
+
+        var gop_cnt: u32 = 0;
+
+        var cnt_progressize: u64 = 0;
+        var cnt_tff: u64 = 0;
+        var cnt_rff: u64 = 0;
+
+        //TODO: heap fragmentation
+        while (true) {
+            //Readin gop from file
+            const gpp = OutGopInfo.readIn(gop_rd) catch break;
+            var gopinfo = try arl.addOne();
+            gopinfo.* = gpp;
+
+            //Calculate values for quickacces
+            const gop_framestart = total_frame_cnt;
+            total_frame_cnt += gpp.frame_cnt;
+
+            const frmcnt: usize = @intCast(gpp.frame_cnt);
+            try framegoplookup.appendNTimes(undefined, frmcnt);
+
+            var arr = framegoplookup.items[framegoplookup.items.len - frmcnt ..];
+
+            for (0..gpp.frame_cnt) |i| {
+                const frm = gpp.frames[i];
+
+                arr[frm.temporal_reference].gop = gop_cnt;
+                arr[frm.temporal_reference].gop_framestart = @as(u32, @intCast(gop_framestart));
+                arr[frm.temporal_reference].decode_frame_offset = @as(u8, @intCast(i));
+
+                if (frm.progressive) cnt_progressize += 1;
+                if (frm.tff) cnt_tff += 1;
+                if (frm.repeat) cnt_rff += 1;
+            }
+
+            gop_cnt += 1;
+        }
+
+        return .{ .gops = arl, .lookuptable = framegoplookup, .total_frame_cnt = total_frame_cnt, .framestats = .{
+            .prog = cnt_progressize,
+            .rff = cnt_rff,
+            .tff = cnt_tff,
+        } };
     }
 };

@@ -61,7 +61,7 @@ pub const PsIndex = struct {
     pub fn add(self: *Self, in_start: u64, in_end: u64, size: u32) !void {
         const one = try self.indexs.addOne();
         one.* = IndexEntry{
-            .in_start = @intCast(AddrType, in_start),
+            .in_start = @intCast(in_start),
             .in_end = in_end,
             .size = size,
             .out_pos = self.current_size,

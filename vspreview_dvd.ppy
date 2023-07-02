@@ -1,0 +1,522 @@
+from __future__ import annotations
+
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import QLabel,QGroupBox,QComboBox, QScrollArea, QLineEdit,QHBoxLayout,QVBoxLayout, QHeaderView, QWidget, QPushButton, QPlainTextEdit, QFileDialog, QTabWidget, QListWidget, QSplitter, QTreeWidget, QTreeWidgetItem
+from yaml import YAMLObject
+from vspreview.core import Notches, Frame,QYAMLObject, QYAMLObjectSingleton, try_load, HBoxLayout, SpinBox, Stretch, Switch, VBoxLayout, PlottingCanvas, PushButton, LineEdit, FrameEdit
+from vspreview.plugins import PluginConfig, PluginGraphicsView, AbstractPlugin
+from vstools import vs, get_prop
+from typing import Any, Mapping, cast
+from pathlib import Path
+import numpy as np
+import collections
+import time
+import os
+import json
+
+from pydvdcompanion import *
+
+__all__ = [
+    'PluginMain',
+    'PluginJSON',
+    'PluginVOBID',
+]
+
+class PluginMain(AbstractPlugin, QWidget):
+    _config = PluginConfig('com.jsaowji.dvd', 'DVD')
+
+    json: dict
+
+    def setup_ui(self) -> None:
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["main"])
+
+        self.last_opened = []
+        self.last_opened_path = os.path.join(self.main.global_config_dir,"dvdopened.json")
+
+        if os.path.exists(self.last_opened_path):
+            with open(self.last_opened_path,"rt") as f:
+                self.last_opened = json.loads(f.read())["last_opened"]
+
+        self.framezz = None
+        self.json = None
+
+        self.notches = dict()
+        self.current_notches = []
+
+        self.tree.itemActivated.connect(self.item_activated)
+        self.tree.itemClicked.connect(self.item_selected)
+
+        self.label = QPlainTextEdit("Nothing opened yet")
+        self.label.setReadOnly(True)
+
+        self.dvdpath = LineEdit("dvdpath")
+        self.openbutton = PushButton("Open",clicked=self.dvd_open_pressed)
+        self.clearbutton = PushButton("Clear",clicked=self.do_clear_recent_open)
+
+        self.last_opened_qbox = QComboBox()
+        self.last_opened_qbox.textActivated.connect(self.last_dvd_opem_selected)
+        self.last_opened_qbox.setMaximumWidth(100)
+        self.update_last_open_qbox()
+
+        VBoxLayout(self,[
+            HBoxLayout([
+                self.last_opened_qbox,
+                self.clearbutton,
+                self.dvdpath,
+                self.openbutton,
+            ]),
+            HBoxLayout([
+                self.tree,
+                self.label,
+            ]),
+        ])
+
+    def get_notches(self) -> Notches:
+        #hack because our on_current_output_changed is called after get_notches
+        index = self.main.toolbars[0].outputs_combobox.currentIndex()
+
+        if index in self.notches.keys():
+            self.current_notches = self.notches[index]
+        else:
+            self.current_notches = []
+
+        return Notches(self.current_notches, Qt.GlobalColor.darkCyan)
+
+    def last_dvd_opem_selected(self,a):
+        self.dvdpath.setText(a)
+
+    def update_last_open_qbox(self):
+        self.last_opened_qbox.clear()
+        self.last_opened_qbox.setCurrentIndex(-1)
+        for a in self.last_opened:
+            self.last_opened_qbox.addItem(a)
+
+    def do_clear_recent_open(self):
+        self.last_opened = []
+        self.dump_recent_open_to_file()
+        self.update_last_open_qbox()
+
+    def dump_recent_open_to_file(self):
+        with open(self.last_opened_path,"wt") as f:
+            a = { "last_opened": self.last_opened }
+            json.dump(a,f)
+
+    def dvd_open_pressed(self):
+        path = self.dvdpath.text()
+        basename = os.path.basename(path)
+        new_node = open_dvd_somehow(path)
+
+        self.add_output(new_node, f"{basename}")
+
+        if path in self.last_opened:
+            self.last_opened.remove(path)
+
+        self.last_opened += [path]
+
+        self.dump_recent_open_to_file()
+        self.update_last_open_qbox()
+
+    def calculate_frame_range_for_title(self,vts: int,current_vts:dict,current_title: dict):
+        rang = Ranger()
+
+        #this wont work properly on multi angle
+
+        if self.json["current_vts"] == vts:
+            framezz = self.framezz
+        else:
+            print("vts not same need to open new Full")
+            prps = vs.core.dvdsrc.Full(self.json["dvdpath"],vts=vts,domain=1).get_frame(0).props
+            framezz = DvdCompanion.extract_framezz(prps)
+
+        pgc0 = current_title[0]["pgcn"]
+        entry_pgn = current_title[0]["pgn"]
+        exit_pgn = current_title[-1]["pgn"]
+
+        #this assumes there is one pgc and and just takes what spans petween the first program and the last
+        #and also takes cells that aren't programs and marks program ones as chapter
+        #this should be correct but no idea because no access to spec so only guess
+
+        crnpgc = current_vts["pgcs"][(current_title[0]["pgcn"]) - 1]
+        entry_cell = crnpgc["program_map"][entry_pgn - 1] - 1
+        exit_cell  = crnpgc["program_map"][exit_pgn - 1] - 1
+
+        cell_that_have_a_program = []
+        for ptt in current_title:
+            if ptt["pgcn"] != pgc0:
+                print("multi pgc title not supported yet (don't know any dvd but they do exist)")
+                return rang
+            cell_that_have_a_program += [ crnpgc["program_map"][ptt["pgn"]-1] ]
+
+        for cell_index in range(entry_cell,exit_cell+1):
+            current_cell_playback = crnpgc["cell_playback"][cell_index]
+            first,last = get_range_for_normal_cell(framezz,current_cell_playback)
+            rang.total_s += dvdtime_to_s(current_cell_playback["playback_time"])
+            rang.add_range(first,last,cell_index in cell_that_have_a_program)
+
+        rang.merge()
+
+        return rang
+
+    def item_selected(self,a):
+        dta = a.data(0,Qt.UserRole)
+        if dta is not None:
+            if dta["type"] == "title":
+                vts = dta["vts"]
+                title = dta["title"]
+                tnr = dta["absolute_title_number"]
+
+                current_ttsrp = self.json["ifos"][0]["tt_srpt"][tnr-1]
+                current_vts = self.json["ifos"][vts]
+                current_title = current_vts["vts_ptt_srpt"][title]
+
+
+                has_all_data = self.json["current_vts"] == vts
+
+                if has_all_data:
+                    rang = self.calculate_frame_range_for_title(vts,current_vts,current_title)
+                else:
+                    rang = Ranger()
+                    rang.ranges = [(0,0)]
+                    rang.original_ranges = []
+                    for a in range(100):
+                        rang.original_ranges += [ (0,0) ]
+                framerange = str(rang.ranges)
+                titlenumber = title + 1
+
+                angl_cnt = current_ttsrp["nr_of_angles"]
+                nr_of_ptts = current_ttsrp["nr_of_ptts"]
+
+                cells = ""
+                for i,e in enumerate(current_title):
+                    a = e["pgcn"]
+                    b = e["pgn"]
+                    c,d = rang.original_ranges[i]
+
+                    cells += f"pgcn {a}  pgn {b}  [{c} {d}]\n"
+
+                chapter_text1 = ""
+                for c in rang.chapters:
+                    chapter_text1 += f"{c}\n"
+
+                totaltime = time.strftime("%H:%M:%S", time.gmtime(rang.total_s))
+                totaltime += ".{:02}".format( int(10*(rang.total_s % 1)))
+
+                require_load = f"""Chapters: {nr_of_ptts}
+Framerange: {framerange}
+Time: {totaltime}
+Chapters (relative): 
+{chapter_text1}
+Contents: 
+{cells}"""
+                labeltext = f"""Titleset: {vts}
+Title: {titlenumber}
+Angles: {angl_cnt}
+"""
+                if has_all_data:
+                    labeltext += "\n" + require_load
+                else:
+                    labeltext += "uncorrect vts opened"
+
+                self.label.setPlainText(labeltext)
+
+
+    def item_activated(self,a:QTreeWidgetItem):
+        dta = a.data(0,Qt.UserRole)
+        if dta is not None:
+            if dta["type"] == "fullvob":
+                vts = dta["vts"]
+                domain = dta["domain"]
+
+                if domain == 0:
+                    dd = "m"#menu
+                else:
+                    dd = "t"#title
+
+                new_node = vs.core.dvdsrc.Full(self.json["dvdpath"],vts=vts,domain=domain)
+
+                self.add_output(new_node,f"vts{vts}{dd}")
+
+            if dta["type"] == "title":
+                vts = dta["vts"]
+                title = dta["title"]
+                absolute_title_number = dta["absolute_title_number"]
+
+                current_vts = self.json["ifos"][vts]
+                current_title = current_vts["vts_ptt_srpt"][title]
+
+                rang = self.calculate_frame_range_for_title(vts,current_vts,current_title)
+
+                new_node = vs.core.dvdsrc.Full(self.json["dvdpath"],vts=vts,domain=1)
+                new_node = cut_node_on_ranges(new_node,rang.ranges)
+
+                self.notches[len(self.main.outputs.items)] = rang.chapters
+                self.add_output(new_node, f"title: {absolute_title_number}")
+
+    def add_output(self,new_node,name):
+        prevnode = self.main.outputs[self.main.current_output.index].with_node(new_node)
+        prevnode.name = name
+
+        self.main.outputs.items.append(prevnode)
+        idxx = len(self.main.outputs.items) - 1
+        self.main.refresh_video_outputs()
+        self.main.switch_output(idxx)
+        frm = self.main.current_output.last_showed_frame
+        self.main.switch_frame(0)
+        self.main.switch_frame(frm)
+
+
+        return idxx
+
+    def on_current_frame_changed(self, frame: Frame) -> None:
+        pass
+
+    def on_current_output_changed(self, index: int, prev_index: int) -> None:
+        self.update_info_from_frame(self.main.current_output.source.clip.get_frame(0))
+    
+    def update_info_from_frame(self,frame):
+        prps = frame.props
+
+        framezz = DvdCompanion.extract_framezz(prps)
+        jdata = DvdCompanion.extract_json(prps)
+        self.angle_data  = DvdCompanion.extract_angle(prps)
+
+        if jdata is None or framezz is None:
+            return
+        self.framezz = framezz
+        self.json = json.loads(jdata)
+
+        vobs_item = QTreeWidgetItem(["Full"])
+        root_item = QTreeWidgetItem(["Titles"])
+        
+        for ifoidx,ifo in enumerate(self.json["ifos"]):
+            menuvobs = QTreeWidgetItem ([f"{ifoidx}_menuvob"])
+            titlevobs = QTreeWidgetItem([f"{ifoidx}_titlevobs"])
+
+            menuvobs.setData(0,Qt.UserRole,{
+                "type": "fullvob",
+                "vts": ifoidx,
+                "domain": 0,
+            })
+            titlevobs.setData(0,Qt.UserRole,{
+                "type": "fullvob",
+                "vts": ifoidx,
+                "domain": 1,
+            })
+
+            #Kind of hacky dunno we only want to check if the vob files exists we want to open
+            cell_cnt = 0
+            for a in ifo["pgci_ut"]:
+                for a in a["pgcs"]:
+                    cell_cnt += a["nr_of_cells"]
+            if cell_cnt >= 1:
+                vobs_item.addChild(menuvobs)
+
+            if ifoidx >= 1:
+                vobs_item.addChild(titlevobs)
+            
+        ifo0 = self.json["ifos"][0]
+
+        for ti,title in enumerate(ifo0["tt_srpt"]):
+            tnr = ti + 1
+            titleI = QTreeWidgetItem([f"title{tnr}"])
+            titleI.setData(0,Qt.UserRole,{
+                "type": "title",
+                "absolute_title_number": tnr,
+                "vts": title["title_set_nr"],
+                "title": title["vts_ttn"]-1,
+            })
+
+            root_item.addChild(titleI)
+
+        self.tree.clear()
+        self.tree.addTopLevelItems([root_item,vobs_item])
+
+        root_item.setExpanded(True)
+        vobs_item.setExpanded(True)
+
+
+#https://github.com/ashwin/json-viewer/blob/master/json_viewer.py
+class TextToTreeItem:
+    def __init__(self):
+        self.text_list = []
+        self.titem_list = []
+
+    def append(self, text_list, titem):
+        for text in text_list:
+            self.text_list.append(text)
+            self.titem_list.append(titem)
+
+    # Return model indices that match string
+    def find(self, find_str):
+
+        titem_list = []
+        for i, s in enumerate(self.text_list):
+            if find_str in s:
+                titem_list.append(self.titem_list[i])
+
+        return titem_list
+
+class JsonView(QWidget):
+    def __init__(self, jstring):
+        super(JsonView, self).__init__()
+
+        self.find_box = None
+        self.tree_widget = None
+        self.text_to_titem = TextToTreeItem()
+        self.find_str = ""
+        self.found_titem_list = []
+        self.found_idx = 0
+
+        jdata = json.loads(jstring, object_pairs_hook=collections.OrderedDict)
+
+        # Find UI
+
+        find_layout = self.make_find_ui()
+
+        # Tree
+
+        self.tree_widget = QTreeWidget()
+        self.tree_widget.setHeaderLabels(["Key", "Value"])
+        self.tree_widget.header().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        root_item = QTreeWidgetItem(["Root"])
+        self.recurse_jdata(jdata, root_item)
+        self.tree_widget.addTopLevelItem(root_item)
+        self.root_item = root_item
+
+        # Add table to layout
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.tree_widget)
+
+        # Group box
+
+        gbox = QGroupBox("mainroo")
+        gbox.setLayout(layout)
+
+        layout2 = QVBoxLayout()
+        layout2.addLayout(find_layout)
+        layout2.addWidget(gbox)
+
+        self.setLayout(layout2)
+
+    def make_find_ui(self):
+        # Text box
+        self.find_box = QLineEdit()
+        self.find_box.returnPressed.connect(self.find_button_clicked)
+
+        # Find Button
+        find_button = QPushButton("Find")
+        find_button.clicked.connect(self.find_button_clicked)
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.find_box)
+        layout.addWidget(find_button)
+
+        return layout
+
+    def find_button_clicked(self):
+        find_str = self.find_box.text()
+
+        # Very common for use to click Find on empty string
+        if find_str == "":
+            return
+
+        # New search string
+        if find_str != self.find_str:
+            self.find_str = find_str
+            self.found_titem_list = self.text_to_titem.find(self.find_str)
+            self.found_idx = 0
+        else:
+            item_num = len(self.found_titem_list)
+            self.found_idx = (self.found_idx + 1) % item_num
+
+        self.tree_widget.setCurrentItem(self.found_titem_list[self.found_idx])
+
+    def recurse_jdata(self, jdata, tree_widget):
+
+        if isinstance(jdata, dict):
+            for key, val in jdata.items():
+                self.tree_add_row(key, val, tree_widget)
+        elif isinstance(jdata, list):
+            for i, val in enumerate(jdata):
+                key = str(i)
+                self.tree_add_row(key, val, tree_widget)
+        else:
+            print("This should never be reached!")
+
+    def tree_add_row(self, key, val, tree_widget):
+        text_list = []
+
+        if isinstance(val, dict) or isinstance(val, list):
+            text_list.append(key)
+            row_item = QTreeWidgetItem([key])
+            self.recurse_jdata(val, row_item)
+        else:
+            text_list.append(key)
+            text_list.append(str(val))
+            row_item = QTreeWidgetItem([key, str(val)])
+
+        tree_widget.addChild(row_item)
+        self.text_to_titem.append(text_list, row_item)
+
+class PluginJSON(AbstractPlugin, QWidget):
+    _config = PluginConfig('com.jsaowji.dvdjson', 'dvdjson')
+
+    def setup_ui(self) -> None:
+        self.json = None
+        
+        self.json_view = JsonView("{" "}")
+
+        VBoxLayout(self, [
+            self.json_view,
+        ])
+
+    def on_current_frame_changed(self, frame: Frame) -> None:
+        pass
+
+    def on_current_output_changed(self, index: int, prev_index: int) -> None:
+        frame = self.main.current_output.source.clip.get_frame(0)
+        
+        prps = frame.props
+
+        jdata = DvdCompanion.extract_json(prps)
+        if jdata is not None:
+            self.json = json.loads(jdata)
+            self.json_view.root_item.takeChildren()
+            self.json_view.recurse_jdata(self.json, self.json_view.root_item)
+
+class PluginVOBID(AbstractPlugin, QWidget):
+    _config = PluginConfig('com.jsaowji.dvdvobid', 'dvdvobid')
+
+    def setup_ui(self) -> None:
+        self.vobids = None
+
+        self.label = QPlainTextEdit("Nothing selected")
+        self.label.setReadOnly(True)
+
+        VBoxLayout(self, [
+            self.label,
+        ])
+
+    def on_current_frame_changed(self, frame: Frame) -> None:
+        pass
+
+    def on_current_output_changed(self, index: int, prev_index: int) -> None:
+        frame = self.main.current_output.source.clip.get_frame(0)
+        prps = frame.props
+
+        self.vobids = DvdCompanion.extract_vobid(prps)
+        if self.vobids is not None:
+            self.fdict = create_vobids_framedict(self.vobids)
+            label_text = "Be sure to select full vts\n"
+
+            for k,v in self.fdict.items():
+                label_text += f"VOBID {k}: "
+                ranges = vstools.normalize_list_to_ranges(v)
+                label_text += f"{ranges}\n"
+
+            self.label.setPlainText(label_text)
+        else:
+            self.fdict = None

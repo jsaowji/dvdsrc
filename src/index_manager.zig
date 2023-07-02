@@ -4,6 +4,7 @@ const utils = @import("utils.zig");
 const mm = std.heap.c_allocator;
 
 pub const Mode = enum {
+    m2v,
     full,
 };
 
@@ -12,41 +13,53 @@ pub const Domain = enum {
     menuvob,
 };
 
+pub const ModeFull = struct {
+    vts: u8,
+    domain: Domain,
+};
+
 pub const ModeInfo = union(Mode) {
-    full: struct {
-        vts: u8,
-        domain: Domain,
-    },
+    m2v,
+    full: ModeFull,
 };
 
 pub const IndexInfo = struct {
     const Self = @This();
 
-    dvd: []u8,
+    //DVD iso, dvd folder, m2v file
+    path: []u8,
     mode: ModeInfo,
 
-    pub fn init(dvd: [*:0]const u8, mode: ModeInfo) !Self {
+    pub fn init(path: [*:0]const u8, mode: ModeInfo) !Self {
         return Self{
-            .dvd = try std.fmt.allocPrint(mm, "{s}", .{dvd}),
+            .path = try std.fmt.allocPrint(mm, "{s}", .{path}),
             .mode = mode,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        mm.free(self.dvd);
+        mm.free(self.path);
     }
 };
 
 pub const IndexManager = struct {
     pub fn getIndexFolder(ii: IndexInfo) !struct { existed: bool, dir: std.fs.Dir } {
-        var basename = std.fs.path.basename(ii.dvd);
+        var basename = std.fs.path.basename(ii.path);
         var hash = std.hash.Crc32.init();
 
-        std.hash.autoHashStrat(&hash, "version0", .Deep);
-        std.hash.autoHashStrat(&hash, ii.dvd, .Deep);
+        std.hash.autoHashStrat(&hash, "version99", .Deep);
+        std.hash.autoHashStrat(&hash, ii.path, .Deep);
         const finalhash = hash.final();
 
-        var pp = try std.fmt.allocPrint(mm, "{s}_{}_{}_{}", .{ basename, ii.mode.full.vts, ii.mode.full.domain, finalhash });
+        var pp: []u8 = undefined;
+        switch (ii.mode) {
+            .full => |a| {
+                pp = try std.fmt.allocPrint(mm, "{s}_{}_{}_{}", .{ basename, a.vts, a.domain, finalhash });
+            },
+            .m2v => {
+                pp = try std.fmt.allocPrint(mm, "{s}_{}", .{ basename, finalhash });
+            },
+        }
         defer mm.free(pp);
 
         const illegal = [_]u8{

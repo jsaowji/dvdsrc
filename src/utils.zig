@@ -21,6 +21,7 @@ pub fn checkStartCode(r: anytype) !u8 {
         std.debug.print("wanted 0 0 1 got {X} {X} {X}\n", .{ buf[0], buf[1], buf[2] });
         return CheckStartCodeError.not001;
     }
+
     return buf[3];
 }
 
@@ -58,7 +59,8 @@ pub fn mpeg2decPictureflagToString(flag: u32) [*c]const u8 {
 }
 
 pub fn debugPrint(comptime fmt: []const u8, args: anytype) void {
-    if (false) {
+    const should = false;
+    if (should) {
         std.debug.print(fmt, args);
     }
 }

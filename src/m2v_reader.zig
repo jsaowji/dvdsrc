@@ -16,6 +16,7 @@ pub fn m2vReader(comptime InnerReaderType: type) type {
 
         const Self = @This();
         const Error = error{OutOfBnds};
+
         pub const Reader = std.io.Reader(*Self, Error, read);
 
         pub fn init(a: ps_index.PsIndex, inner: InnerReaderType) !Self {
@@ -69,7 +70,7 @@ pub fn m2vReader(comptime InnerReaderType: type) type {
             return rd_size;
         }
 
-        pub fn seek(self: *Self, dst: u64) void {
+        pub fn seekTo(self: *Self, dst: u64) !void {
             self.offset = dst;
             var cummulative_size: u64 = 0;
             var i: usize = 0;
