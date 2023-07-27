@@ -74,12 +74,13 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
             debugPrint("Total slice seen: {}\n", .{self.total_framecnt});
             debugPrint("Total pictures seen: {}\n", .{self.total_piccnt});
 
-            if (self.total_framecnt != self.total_piccnt) {
-                std.debug.print("IMPROPERLY CUT STREAM SLICECNT != PICCNT ??? clamping to lower\n", .{});
-                std.debug.print("THIS happens at end of stream its ok if not big bad and report issue pls\n", .{});
-                const delta = self.total_piccnt - self.total_framecnt;
-                self.current_gop.frame_cnt -= @as(u8, @intCast(delta));
-            }
+            //if (self.total_framecnt != self.total_piccnt) {
+            //    std.debug.print("IMPROPERLY CUT STREAM SLICECNT != PICCNT ??? clamping to lower\n", .{});
+            //    std.debug.print("THIS happens at end of stream its ok if not big bad and report issue pls\n", .{});
+            //    const delta = self.total_piccnt - self.total_framecnt;
+            //    self.current_gop.frame_cnt -= @as(u8, @intCast(delta));
+            //}
+
             try self.current_gop.writeOut(self.gop_buf);
         }
 

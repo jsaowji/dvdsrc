@@ -54,6 +54,10 @@ class PluginMain(AbstractPlugin, QWidget):
         self.openbutton = PushButton("Open",clicked=self.dvd_open_pressed)
         self.clearbutton = PushButton("Clear",clicked=self.do_clear_recent_open)
 
+        self.tofilebutton = PushButton("ToFile",clicked=self.to_file_clicked)
+        self.current_selected_title = None
+
+
         self.last_opened_qbox = QComboBox()
         self.last_opened_qbox.textActivated.connect(self.last_dvd_opem_selected)
         self.last_opened_qbox.setMaximumWidth(100)
@@ -70,12 +74,45 @@ class PluginMain(AbstractPlugin, QWidget):
             ]),
             HBoxLayout([
                 self.selected_angle_index,
+                self.tofilebutton,
             ]),
             HBoxLayout([
                 self.tree,
                 self.label,
             ]),
         ])
+
+
+    def to_file_clicked(self):
+        if self.current_selected_title is not None:
+            try:
+                ai = int(self.selected_angle_index.text())
+            except:
+                ai = 0
+
+            vts = self.current_selected_title_source["vts"]
+            current_vts = self.current_selected_title_source["current_vts"]
+            current_title = self.current_selected_title_source["current_title"]
+            
+            rang = self.calculate_frame_range_for_title(vts,current_vts,current_title,ai)
+            
+
+
+            path = self.json["dvdpath"]
+            vts = self.json["current_vts"]
+            domain = 1
+
+            from vstools import core
+            secstors = []
+            for a in rang.sectors:
+                for b in range(a[0],a[1]+1):
+                    secstors += [ b ]
+
+            save_path_str, file_type = QFileDialog.getSaveFileName(
+                self.main, 'Save as', "/tmp", "vob (*.vob)"
+            )
+            if not (file_type is None):
+                core.dvdsrc.VobToFile(path,vts,domain,secstors,save_path_str)
 
     def get_notches(self) -> Notches:
         #hack because our on_current_output_changed is called after get_notches
@@ -131,7 +168,7 @@ class PluginMain(AbstractPlugin, QWidget):
             prps = vs.core.dvdsrc.Full(self.json["dvdpath"],vts=vts,domain=1).get_frame(0).props
             framezz = DvdCompanion.extract_framezz(prps)
 
-        return calculate_frame_range_for_title(framezz,self.vobid_dict,current_vts,current_title,angle_index)
+        return calculate_frame_range_for_title(framezz,current_vts,current_title,angle_index)
 
 
 
@@ -157,6 +194,12 @@ class PluginMain(AbstractPlugin, QWidget):
                         ai = 0
 
                     rang = self.calculate_frame_range_for_title(vts,current_vts,current_title,ai)
+                    self.current_selected_title = rang
+                    self.current_selected_title_source = {
+                        "vts": vts,
+                        "current_vts": current_vts,
+                        "current_title": current_title,
+                    }
                 else:
                     rang = Ranger()
                     rang.ranges = [(0,0)]

@@ -173,12 +173,26 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
       vts["vtsi_mat"] = jj;
     }
 
+    if (ifo2->vts_vobu_admap) {
+      auto vts_vobu_admap = ifo2->vts_vobu_admap;
+      json jj = json::array();
+
+      for (int kk = 0; kk < (vts_vobu_admap->last_byte + 1 - VOBU_ADMAP_SIZE) /
+                                sizeof(cell_adr_t);
+           kk++) {
+        jj.push_back(vts_vobu_admap->vobu_start_sectors[kk]);
+      }
+
+      vts["vts_vobu_admap"] = jj;
+    }
     if (ifo2->vts_c_adt) {
       auto vts_c_adt = ifo2->vts_c_adt;
       json jj = json::array();
 
-      for (int vob = 0; vob < vts_c_adt->nr_of_vobs; vob++) {
-        auto vobus = vts_c_adt->cell_adr_table[vob];
+      for (int kk = 0;
+           kk < (vts_c_adt->last_byte + 1 - C_ADT_SIZE) / sizeof(cell_adr_t);
+           kk++) {
+        auto vobus = vts_c_adt->cell_adr_table[kk];
         json dd;
 
         dd["cell_id"] = vobus.cell_id;

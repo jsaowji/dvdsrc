@@ -373,8 +373,65 @@ const FullFilter = struct {
 
 pub extern fn getstring(bigbuffer: *u8, decoder: ?*dvdread.dvd_reader_t, dvdpath: *const u8, current_vts: u32) [*c]const u8;
 
+const VobToFile = struct {
+    pub export fn vobtoFileCreate(in: ?*const vs.VSMap, out: ?*vs.VSMap, userData: ?*anyopaque, core: ?*vs.VSCore, vsapi: [*c]const vs.VSAPI) callconv(.C) void {
+        _ = userData;
+        _ = core;
+        const outfile = vsapi.*.mapGetData.?(in, "outfile", 0, 0);
+        const dvd = vsapi.*.mapGetData.?(in, "dvd", 0, 0);
+        const vts = vsapi.*.mapGetInt.?(in, "vts", 0, 0);
+        const vsdomain = vsapi.*.mapGetInt.?(in, "domain", 0, 0);
+
+        var ii_domain: index_manager.Domain = undefined;
+
+        if (vsdomain == 0) {
+            ii_domain = .menuvob;
+        } else if (vsdomain == 1) {
+            ii_domain = .titlevobs;
+        } else {
+            vsapi.*.mapSetError.?(out, "dvdsrc: domain only supported 0 menuvob 1 titlevob");
+            return;
+        }
+
+        var dvd_r = dvdread.DVDOpen2(null, &dvd_reader.dummy_logger, dvd);
+        defer dvdread.DVDClose(dvd_r);
+
+        if (dvd_r == null) {
+            vsapi.*.mapSetError.?(out, "dvdsrc: dvd does not open");
+            return;
+        }
+
+        var domain: c_uint = undefined;
+        if (domain == 0) {
+            domain = dvdread.DVD_READ_MENU_VOBS;
+        } else {
+            domain = dvdread.DVD_READ_TITLE_VOBS;
+        }
+
+        var dvdfile = dvdread.DVDOpenFile(@as(*dvdread.dvd_reader_t, @ptrCast(dvd_r)), @as(c_int, @intCast(vts)), domain);
+        defer dvdread.DVDCloseFile(dvdfile);
+
+        const sector_cnt = vsapi.*.mapNumElements.?(in, "sectors");
+
+        var file = std.fs.createFileAbsolute(std.mem.span(outfile), .{}) catch unreachable;
+        defer file.close();
+        var bufwrite = std.io.bufferedWriter(file.writer());
+        defer bufwrite.flush() catch unreachable;
+
+        var buffer: [2048]u8 = undefined;
+
+        for (0..@as(usize, @intCast(sector_cnt))) |sector_i| {
+            const sector = vsapi.*.mapGetInt.?(in, "sectors", @as(c_int, @intCast(sector_i)), 0);
+            _ = dvdread.DVDReadBlocks(dvdfile, @as(c_int, @intCast(sector)), 1, &buffer);
+            bufwrite.writer().writeAll(&buffer) catch unreachable;
+        }
+    }
+};
+
 export fn VapourSynthPluginInit2(plugin: ?*vs.VSPlugin, vspapi: *const vs.VSPLUGINAPI) void {
     _ = vspapi.configPlugin.?("com.jsaowji.dvdsrc", "dvdsrc", "VapourSynth DVD source", vs.VS_MAKE_VERSION(1, 0), vs.VAPOURSYNTH_API_VERSION, 0, plugin);
     _ = vspapi.registerFunction.?("Full", "dvd:data;vts:int;domain:int", "clip:vnode;", FullFilter.fullFilterCreate, vs.NULL, plugin);
     _ = vspapi.registerFunction.?("M2V", "path:data", "clip:vnode;", M2vFilter.filterCreate, vs.NULL, plugin);
+
+    _ = vspapi.registerFunction.?("VobToFile", "dvd:data;vts:int;domain:int;sectors:int[];outfile:data", "", VobToFile.vobtoFileCreate, vs.NULL, plugin);
 }

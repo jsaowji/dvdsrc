@@ -92,9 +92,14 @@ class Ranger:
         self.original_chapters = []
         self.chapters = []
         self.original_ranges = []
+        self.sectors = []
+
         self.total_s = 0.0
         self.current_chapter_offset = 0
 
+    def add_sectors(self,sector_pair):
+        self.sectors += [sector_pair]
+    
     #start inclusive end inclusive
     def add_range(self,start,end,should_add_chapter):
         self.ranges += [ [start,end] ]
@@ -139,12 +144,12 @@ def get_frames_for_interleaved_cell(framezz, vobiddict, playback, position) -> l
     return filtered
 
 
-def get_range_for_normal_cell(framezz,playback) -> Tuple[int,int]:
+def get_frame_range_between_first_last_sector(framezz: list[int],first_sector: int,last_sector: int) -> Tuple[int,int]:
     first = None
     last = None
 
-    fs = playback["first_sector"] * 2048
-    ls = (playback["last_sector"]+1) * 2048
+    fs = first_sector * 2048
+    ls = (last_sector+1) * 2048
 
     roughfirst = binarySearch(framezz,fs)
     roughlast = binarySearch(framezz,ls)
@@ -164,6 +169,8 @@ def get_range_for_normal_cell(framezz,playback) -> Tuple[int,int]:
 
     return (first,last)
 
+def get_range_for_normal_cell(framezz,playback) -> Tuple[int,int]:
+    return get_frame_range_between_first_last_sector(framezz,playback["first_sector"],playback["last_sector"])
 
 
 def cut_node(node: vs.VideoNode,frames: list[int]) -> vs.VideoNode:
@@ -206,14 +213,28 @@ def open_dvd_somehow(path):
 #nodes = {k: pydvdcompanion.cut_node(aa,v) for k, v in frmvobids.items()}
 
 
-def calculate_frame_range_for_title(framezz,vobid_dict: dict, current_vts:dict,current_title: dict,angle_index: int = 0):
+def get_sectorranges_for_vobcellpair(current_vts:dict,cell_id:int,vob_id: int):
+    ranges = []
+
+    #todo binary search for vobid
+    #assumes vts_c_adt is sorted
+    for e in current_vts["vts_c_adt"]:
+        if e["cell_id"] == cell_id and e["vob_id"] == vob_id:
+            ranges +=  [ (e["start_sector"],e["last_sector"])]
+        #if e["vob_id"] > vob_id:
+        #    break
+    return ranges
+
+
+# saves frame an sector range
+def calculate_frame_range_for_title(framezz,current_vts:dict,current_title: dict,angle_index: int = 0):
     rang = Ranger()
 
     pgc0 = current_title[0]["pgcn"]
     entry_pgn = current_title[0]["pgn"]
-    exit_pgn = current_title[-1]["pgn"]
+    #exit_pgn = current_title[-1]["pgn"]
 
-    #this assumes there is one pgc and and just takes what spans petween the first program and the last
+    #this assumes there is one pgc and and just takes what spans petween the first program and the last cell
     #and also takes cells that aren't programs and marks program ones as chapter
     #this should be correct but no idea because no access to spec so only guess
 
@@ -235,29 +256,28 @@ def calculate_frame_range_for_title(framezz,vobid_dict: dict, current_vts:dict,c
     #this assumes angles always appear in the chronologically order as cells
     angle_i = 0
 
-    for cell_index in range(entry_cell,exit_cell+1):
+    for cell_index in range(entry_cell, exit_cell+1):
         current_cell_playback = crnpgc["cell_playback"][cell_index]
         current_cell_position = crnpgc["cell_position"][cell_index]
 
-        if not current_cell_playback["interleaved"]:
+        sector_ranges = get_sectorranges_for_vobcellpair(current_vts,current_cell_position["cell_nr"],current_cell_position["vob_id_nr"])
+        
+        inleaved = current_cell_playback["interleaved"]
+
+        if not inleaved:
             angle_i = 0
-            first,last = get_range_for_normal_cell(framezz,current_cell_playback)
-            rang.total_s += dvdtime_to_s(current_cell_playback["playback_time"])
-            rang.add_range(first,last,cell_index in cell_that_have_a_program)
-        else:
-            #print("interleaved cell in title")
-            if angle_i == angle_index:
-                #print("adding angle {}".format(angle_i))
-                frames = get_frames_for_interleaved_cell(framezz,vobid_dict,current_cell_playback,current_cell_position)
-                rang.total_s += dvdtime_to_s(current_cell_playback["playback_time"])
-                #print(frames)
-                for ii,a in enumerate(frames):
-                    rang.add_range(a,a,(cell_index in cell_that_have_a_program) and (ii == 0))
-            else:
-                #print("skipping angle {}".format(angle_i))
-                pass
+        
+        if angle_i == angle_index or (not inleaved):
+            for ii,rangey in enumerate(sector_ranges):
+                start,end = get_frame_range_between_first_last_sector(framezz,rangey[0],rangey[1])
+                rang.add_range(start,end,(cell_index in cell_that_have_a_program) and (ii == 0))
+                rang.add_sectors(rangey)
+
+        if inleaved:
             angle_i += 1
 
+        rang.total_s += dvdtime_to_s(current_cell_playback["playback_time"])
+        
     rang.merge()
 
     return rang
