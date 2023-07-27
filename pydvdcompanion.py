@@ -1,11 +1,15 @@
+from typing import Tuple
 import vstools
 import functools
 from vstools import vs
 
+import json
+
 class DvdCompanion:
     def __init__(self,node: vs.VideoNode):
         self.frame0 = node.get_frame(0)
-        self.json = DvdCompanion.extract_json(self.frame0.props)
+        self.json_str = DvdCompanion.extract_json(self.frame0.props)
+        self.json = json.loads(self.json_str)
         self.framezz = DvdCompanion.extract_framezz(self.frame0.props)
         self.vobid = DvdCompanion.extract_vobid(self.frame0.props)
         self.angle = DvdCompanion.extract_angle(self.frame0.props)
@@ -119,8 +123,23 @@ class Ranger:
                     break
         self.ranges = ranges
 
-#only usable on non interleaved cells
-def get_range_for_normal_cell(framezz,playback):
+def get_frames_for_interleaved_cell(framezz, vobiddict, playback, position) -> list[int]:
+    first,last = get_range_for_normal_cell(framezz,playback)
+    frames = vobiddict[position["vob_id_nr"]]
+    filtered = list(filter(lambda f: f >= first and f <= last, frames))
+    if len(filtered) != len(frames) or len(filtered) != len(frames):
+        print("mismatch between filtered and frames")
+        print("this breaks a assumption the a single angle cell is a single vobid")
+
+        
+        print("FILTERED")
+        print(filtered)
+        print("FRAMES")
+        print(frames)
+    return filtered
+
+
+def get_range_for_normal_cell(framezz,playback) -> Tuple[int,int]:
     first = None
     last = None
 
@@ -185,6 +204,63 @@ def open_dvd_somehow(path):
 
 #lel = {k: vstools.normalize_list_to_ranges(v) for k, v in frmvobids.items()}
 #nodes = {k: pydvdcompanion.cut_node(aa,v) for k, v in frmvobids.items()}
+
+
+def calculate_frame_range_for_title(framezz,vobid_dict: dict, current_vts:dict,current_title: dict,angle_index: int = 0):
+    rang = Ranger()
+
+    pgc0 = current_title[0]["pgcn"]
+    entry_pgn = current_title[0]["pgn"]
+    exit_pgn = current_title[-1]["pgn"]
+
+    #this assumes there is one pgc and and just takes what spans petween the first program and the last
+    #and also takes cells that aren't programs and marks program ones as chapter
+    #this should be correct but no idea because no access to spec so only guess
+
+    crnpgc = current_vts["pgcs"][(current_title[0]["pgcn"]) - 1]
+        
+    #this seems to only be used fo chapters but for playback everything from the entry up untill ends needs to be considered ??
+    entry_cell = crnpgc["program_map"][entry_pgn - 1] - 1
+    #exit_cell  = crnpgc["program_map"][exit_pgn - 1] - 1
+    exit_cell = len(crnpgc["cell_position"]) - 1
+
+    cell_that_have_a_program = []
+    for ptt in current_title:
+        if ptt["pgcn"] != pgc0:
+            print("multi pgc title not supported yet (don't know any dvd but they do exist)")
+            return rang
+        cell_that_have_a_program += [ crnpgc["program_map"][ptt["pgn"]-1] ]
+
+
+    #this assumes angles always appear in the chronologically order as cells
+    angle_i = 0
+
+    for cell_index in range(entry_cell,exit_cell+1):
+        current_cell_playback = crnpgc["cell_playback"][cell_index]
+        current_cell_position = crnpgc["cell_position"][cell_index]
+
+        if not current_cell_playback["interleaved"]:
+            angle_i = 0
+            first,last = get_range_for_normal_cell(framezz,current_cell_playback)
+            rang.total_s += dvdtime_to_s(current_cell_playback["playback_time"])
+            rang.add_range(first,last,cell_index in cell_that_have_a_program)
+        else:
+            #print("interleaved cell in title")
+            if angle_i == angle_index:
+                #print("adding angle {}".format(angle_i))
+                frames = get_frames_for_interleaved_cell(framezz,vobid_dict,current_cell_playback,current_cell_position)
+                rang.total_s += dvdtime_to_s(current_cell_playback["playback_time"])
+                #print(frames)
+                for ii,a in enumerate(frames):
+                    rang.add_range(a,a,(cell_index in cell_that_have_a_program) and (ii == 0))
+            else:
+                #print("skipping angle {}".format(angle_i))
+                pass
+            angle_i += 1
+
+    rang.merge()
+
+    return rang
 
 
 def bcd_to_int(bcd: int) -> int:

@@ -16,7 +16,7 @@ namespace and api not final
 ## m2v
     dvdsrc.M2V(str path)
 
-- dvd: Path to dvd. ISO or parent of VIDEO_TS
+- path: Path to m2v file
 
 
 # Build for linux/win under linux

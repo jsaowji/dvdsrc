@@ -15,6 +15,11 @@ const indexer = @import("./indexer.zig");
 
 const mm = std.heap.c_allocator;
 
+const FilterConfiguration = struct {
+    fake_vfr: bool,
+    guess_ar: bool,
+};
+
 const M2vFilter = struct {
     const M2vFilterData = struct {
         const Self = @This();
@@ -23,7 +28,7 @@ const M2vFilter = struct {
         file: std.fs.File,
         randy: rad.RandomAccessDecoder(std.fs.File),
 
-        fn init(path: []const u8, video_info: vs.VSVideoInfo, goplookup: m2v_index.GopLookup) Self {
+        fn init(path: []const u8, video_info: vs.VSVideoInfo, goplookup: m2v_index.GopLookup, fconf: FilterConfiguration) Self {
             var file = std.fs.openFileAbsolute(path, .{}) catch unreachable;
 
             return Self{
@@ -34,6 +39,8 @@ const M2vFilter = struct {
                     .gopy = goplookup,
                     .decoder_state = null,
                     .video_info = video_info,
+                    .guess_ar = fconf.guess_ar,
+                    .fake_vfr = fconf.fake_vfr,
                 },
             };
         }
@@ -108,12 +115,17 @@ const M2vFilter = struct {
 
         const goplookup = m2v_index.GopLookup.init(mm, gop_rd.reader()) catch unreachable;
 
+        var fake_vfr = goplookup.framestats.rff != 0;
+        _ = fake_vfr;
         var vi = rad.seqToVideoInfo(&seq, goplookup.total_frame_cnt);
 
         _ = vsapi.*.getVideoFormatByID.?(&vi.format, vs.pfYUV420P8, core);
 
         var data = mm.create(M2vFilterData) catch unreachable;
-        data.* = M2vFilterData.init(idxnfo.path, vi, goplookup);
+        data.* = M2vFilterData.init(idxnfo.path, vi, goplookup, .{
+            .guess_ar = true,
+            .fake_vfr = true,
+        });
 
         vsapi.*.createVideoFilter.?(out, "M2V", &data.video_info, filterGetFrame, filterFree, vs.fmUnordered, null, 0, data, core);
     }
@@ -132,7 +144,7 @@ const FullFilter = struct {
 
         randy: rad.RandomAccessDecoder(m2v_reader.m2vReader(dvd_reader.DvdReader)),
 
-        fn init(dvd: [*c]const u8, vts: u8, main: u8, video_info: vs.VSVideoInfo, idx: ps_index.PsIndex, goplookup: m2v_index.GopLookup) !Self {
+        fn init(dvd: [*c]const u8, vts: u8, main: u8, video_info: vs.VSVideoInfo, idx: ps_index.PsIndex, goplookup: m2v_index.GopLookup, fconf: FilterConfiguration) !Self {
             var dvd_r = dvdread.DVDOpen2(null, &dvd_reader.dummy_logger, dvd);
 
             if (dvd_r == null) {
@@ -159,6 +171,8 @@ const FullFilter = struct {
 
                     .decoder_state = null,
                     .video_info = video_info,
+                    .fake_vfr = fconf.fake_vfr,
+                    .guess_ar = fconf.guess_ar,
                 },
             };
         }
@@ -284,6 +298,8 @@ const FullFilter = struct {
 
         const goplookup = m2v_index.GopLookup.init(mm, gop_rd.reader()) catch unreachable;
 
+        var fake_vfr = goplookup.framestats.rff != 0;
+        _ = fake_vfr;
         var vi = rad.seqToVideoInfo(&seq, goplookup.total_frame_cnt);
 
         _ = vsapi.*.getVideoFormatByID.?(&vi.format, vs.pfYUV420P8, core);
@@ -307,6 +323,14 @@ const FullFilter = struct {
         var vobid_frame = vsapi.*.newVideoFrame.?(&format, f1sz, 1, null, core);
         var angle_frame = vsapi.*.newVideoFrame.?(&format, f1sz, 1, null, core);
 
+        data.* = FullFilterData.init(dvd, @as(u8, @intCast(vts)), @as(u8, @intCast(domain)), vi, psidx, goplookup, .{
+            .guess_ar = true,
+            .fake_vfr = true,
+        }) catch {
+            vsapi.*.mapSetError.?(out, "dvdsrc: iso file does not exist");
+            return;
+        };
+        vsapi.*.createVideoFilter.?(out, "Full", &data.video_info, fullFilterGetFrame, fullFilterFree, vs.fmUnordered, null, 0, data, core);
         {
             var dvd_r = dvdread.DVDOpen2(null, &dvd_reader.dummy_logger, dvd);
             defer dvdread.DVDClose(dvd_r);
@@ -340,12 +364,6 @@ const FullFilter = struct {
                 std.mem.writeIntSliceLittle(u64, f3_ptr[0..8], file_sz);
             }
         }
-        data.* = FullFilterData.init(dvd, @as(u8, @intCast(vts)), @as(u8, @intCast(domain)), vi, psidx, goplookup) catch {
-            vsapi.*.mapSetError.?(out, "dvdsrc: iso file does not exist");
-            return;
-        };
-        vsapi.*.createVideoFilter.?(out, "Full", &data.video_info, fullFilterGetFrame, fullFilterFree, vs.fmUnordered, null, 0, data, core);
-
         data.*.randy.file_frame_position_frame = f1;
         data.*.randy.json_frame = f2;
         data.*.randy.vobid_frame = vobid_frame;

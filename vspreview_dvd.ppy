@@ -59,12 +59,17 @@ class PluginMain(AbstractPlugin, QWidget):
         self.last_opened_qbox.setMaximumWidth(100)
         self.update_last_open_qbox()
 
+        self.selected_angle_index = LineEdit("angle index (0..7)")
+
         VBoxLayout(self,[
             HBoxLayout([
                 self.last_opened_qbox,
                 self.clearbutton,
                 self.dvdpath,
                 self.openbutton,
+            ]),
+            HBoxLayout([
+                self.selected_angle_index,
             ]),
             HBoxLayout([
                 self.tree,
@@ -117,11 +122,8 @@ class PluginMain(AbstractPlugin, QWidget):
         self.dump_recent_open_to_file()
         self.update_last_open_qbox()
 
-    def calculate_frame_range_for_title(self,vts: int,current_vts:dict,current_title: dict):
-        rang = Ranger()
 
-        #this wont work properly on multi angle
-
+    def calculate_frame_range_for_title(self,vts: int,current_vts:dict,current_title: dict,angle_index: int = 0):
         if self.json["current_vts"] == vts:
             framezz = self.framezz
         else:
@@ -129,34 +131,9 @@ class PluginMain(AbstractPlugin, QWidget):
             prps = vs.core.dvdsrc.Full(self.json["dvdpath"],vts=vts,domain=1).get_frame(0).props
             framezz = DvdCompanion.extract_framezz(prps)
 
-        pgc0 = current_title[0]["pgcn"]
-        entry_pgn = current_title[0]["pgn"]
-        exit_pgn = current_title[-1]["pgn"]
+        return calculate_frame_range_for_title(framezz,self.vobid_dict,current_vts,current_title,angle_index)
 
-        #this assumes there is one pgc and and just takes what spans petween the first program and the last
-        #and also takes cells that aren't programs and marks program ones as chapter
-        #this should be correct but no idea because no access to spec so only guess
 
-        crnpgc = current_vts["pgcs"][(current_title[0]["pgcn"]) - 1]
-        entry_cell = crnpgc["program_map"][entry_pgn - 1] - 1
-        exit_cell  = crnpgc["program_map"][exit_pgn - 1] - 1
-
-        cell_that_have_a_program = []
-        for ptt in current_title:
-            if ptt["pgcn"] != pgc0:
-                print("multi pgc title not supported yet (don't know any dvd but they do exist)")
-                return rang
-            cell_that_have_a_program += [ crnpgc["program_map"][ptt["pgn"]-1] ]
-
-        for cell_index in range(entry_cell,exit_cell+1):
-            current_cell_playback = crnpgc["cell_playback"][cell_index]
-            first,last = get_range_for_normal_cell(framezz,current_cell_playback)
-            rang.total_s += dvdtime_to_s(current_cell_playback["playback_time"])
-            rang.add_range(first,last,cell_index in cell_that_have_a_program)
-
-        rang.merge()
-
-        return rang
 
     def item_selected(self,a):
         dta = a.data(0,Qt.UserRole)
@@ -174,7 +151,12 @@ class PluginMain(AbstractPlugin, QWidget):
                 has_all_data = self.json["current_vts"] == vts
 
                 if has_all_data:
-                    rang = self.calculate_frame_range_for_title(vts,current_vts,current_title)
+                    try:
+                        ai = int(self.selected_angle_index.text())
+                    except:
+                        ai = 0
+
+                    rang = self.calculate_frame_range_for_title(vts,current_vts,current_title,ai)
                 else:
                     rang = Ranger()
                     rang.ranges = [(0,0)]
@@ -237,15 +219,27 @@ Angles: {angl_cnt}
 
                 self.add_output(new_node,f"vts{vts}{dd}")
 
+
+
             if dta["type"] == "title":
                 vts = dta["vts"]
                 title = dta["title"]
+
+                has_all_data = self.json["current_vts"] == vts
+
+                if not has_all_data:
+                    return
+
                 absolute_title_number = dta["absolute_title_number"]
 
                 current_vts = self.json["ifos"][vts]
                 current_title = current_vts["vts_ptt_srpt"][title]
 
-                rang = self.calculate_frame_range_for_title(vts,current_vts,current_title)
+                try:
+                    ai = int(self.selected_angle_index.text())
+                except:
+                    ai = 0
+                rang = self.calculate_frame_range_for_title(vts,current_vts,current_title,ai)
 
                 new_node = vs.core.dvdsrc.Full(self.json["dvdpath"],vts=vts,domain=1)
                 new_node = cut_node_on_ranges(new_node,rang.ranges)
@@ -280,9 +274,14 @@ Angles: {angl_cnt}
         framezz = DvdCompanion.extract_framezz(prps)
         jdata = DvdCompanion.extract_json(prps)
         self.angle_data  = DvdCompanion.extract_angle(prps)
+        self.vobid_data  = DvdCompanion.extract_vobid(prps)
+
 
         if jdata is None or framezz is None:
             return
+
+        self.vobid_dict  = create_vobids_framedict(self.vobid_data)
+
         self.framezz = framezz
         self.json = json.loads(jdata)
 

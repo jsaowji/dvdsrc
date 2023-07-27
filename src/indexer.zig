@@ -70,10 +70,17 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
         fn end(self: *Self) !void {
             fixGop(&self.current_gop);
 
-            try self.current_gop.writeOut(self.gop_buf);
-
             debugPrint("last gop write framecount: {any}\n", .{self.current_gop.frame_cnt});
-            debugPrint("Total frames seen: {}\n", .{self.total_framecnt});
+            debugPrint("Total slice seen: {}\n", .{self.total_framecnt});
+            debugPrint("Total pictures seen: {}\n", .{self.total_piccnt});
+
+            if (self.total_framecnt != self.total_piccnt) {
+                std.debug.print("IMPROPERLY CUT STREAM SLICECNT != PICCNT ??? clamping to lower\n", .{});
+                std.debug.print("THIS happens at end of stream its ok if not big bad and report issue pls\n", .{});
+                const delta = self.total_piccnt - self.total_framecnt;
+                self.current_gop.frame_cnt -= @as(u8, @intCast(delta));
+            }
+            try self.current_gop.writeOut(self.gop_buf);
         }
 
         fn handleDataInBuf(self: *Self, buf: []const u8) !void {
@@ -103,9 +110,6 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                             self.slice_cnt += 1;
                             self.total_framecnt += 1;
                         }
-                    },
-                    mpeg2.STATE_PICTURE_2ND => {
-                        std.debug.assert(false);
                     },
                     mpeg2.STATE_PICTURE => {
                         const FrameType = m2v_index.FrameType;
@@ -190,6 +194,9 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                     mpeg2.STATE_INVALID => {
                         std.debug.print("!!!!!!!GOT INVALID!!!!!!", .{});
                     },
+
+                    mpeg2.STATE_PICTURE_2ND, mpeg2.STATE_SLICE_1ST => {},
+
                     else => {
                         std.debug.print("GOT {s}\n", .{utils.mpeg2decStateToString(state)});
                         unreachable;

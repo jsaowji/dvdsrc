@@ -27,6 +27,9 @@ pub fn RandomAccessDecoder(comptime M2vReaderType: type) type {
         vobid_frame: ?*vs.VSFrame = null,
         angle_frame: ?*vs.VSFrame = null,
 
+        guess_ar: bool,
+        fake_vfr: bool,
+
         decoder_state: ?struct {
             const DecoderSelf = @This();
             decoder: *mpeg2.mpeg2dec_t,
@@ -364,7 +367,7 @@ pub fn RandomAccessDecoder(comptime M2vReaderType: type) type {
                                     if (ds.cache[i] == null) {
                                         var f2 = vsapi.*.newVideoFrame.?(&self.video_info.format, self.video_info.width, self.video_info.height, null, core);
 
-                                        writeFbufToVsframe(f2, vsapi, fbuf, seq, frame_at_slice, ds.slice_cnt, gopl.gop, wanted_gop.closed);
+                                        writeFbufToVsframe(f2, vsapi, info.*.current_picture, fbuf, seq, frame_at_slice, ds.slice_cnt, gopl.gop, wanted_gop.closed, self.fake_vfr, self.guess_ar);
                                         ds.cache[i] = .{
                                             .frame = f2.?,
                                             .temporal = frame_at_slice.temporal_reference,
@@ -403,7 +406,7 @@ pub fn RandomAccessDecoder(comptime M2vReaderType: type) type {
     };
 }
 
-fn writeFbufToVsframe(f: ?*vs.VSFrame, vsapi: [*c]const vs.VSAPI, fbuf: mpeg2.mpeg2_fbuf_t, seq: mpeg2.mpeg2_sequence_t, frm: *const m2v_index.Frame, index_in_gop: u8, gop: u64, gop_closed: bool) void {
+fn writeFbufToVsframe(f: ?*vs.VSFrame, vsapi: [*c]const vs.VSAPI, picture: *const mpeg2.mpeg2_picture_t, fbuf: mpeg2.mpeg2_fbuf_t, seq: mpeg2.mpeg2_sequence_t, frm: *const m2v_index.Frame, index_in_gop: u8, gop: u64, gop_closed: bool, vfr: bool, guess_ar: bool) void {
     //Copy plane data
     {
         var wp0 = vsapi.*.getWritePtr.?(f, 0);
@@ -442,6 +445,8 @@ fn writeFbufToVsframe(f: ?*vs.VSFrame, vsapi: [*c]const vs.VSAPI, fbuf: mpeg2.mp
         } else {
             _ = vsapi.*.mapSetInt.?(map, "_FieldBased", vs.VSC_FIELD_BOTTOM, vs.maReplace);
         }
+    } else {
+        _ = vsapi.*.mapSetInt.?(map, "_FieldBased", vs.VSC_FIELD_PROGRESSIVE, vs.maReplace);
     }
 
     switch (frm.frametype) {
@@ -458,9 +463,38 @@ fn writeFbufToVsframe(f: ?*vs.VSFrame, vsapi: [*c]const vs.VSAPI, fbuf: mpeg2.mp
 
     //SAR
     if (seq.pixel_width > 0 and seq.pixel_height > 0) {
-        _ = vsapi.*.mapSetInt.?(map, "_SARNum", seq.pixel_width, vs.maReplace);
-        _ = vsapi.*.mapSetInt.?(map, "_SARDen", seq.pixel_height, vs.maReplace);
+        var default_sar = true;
+        if (guess_ar) {
+            var pw: c_uint = 0;
+            var ph: c_uint = 0;
+
+            const ret = mpeg2.mpeg2_guess_aspect(&seq, &pw, &ph);
+
+            if (ret != 0) {
+                _ = vsapi.*.mapSetInt.?(map, "_SARNum", pw, vs.maReplace);
+                _ = vsapi.*.mapSetInt.?(map, "_SARDen", ph, vs.maReplace);
+                default_sar = false;
+            }
+        }
+
+        if (default_sar) {
+            _ = vsapi.*.mapSetInt.?(map, "_SARNum", seq.pixel_width, vs.maReplace);
+            _ = vsapi.*.mapSetInt.?(map, "_SARDen", seq.pixel_height, vs.maReplace);
+        }
     }
+
+    _ = vfr;
+    _ = picture;
+    //if (vfr) {
+    //    const gcd = std.math.gcd(27000000, seq.frame_period);
+    //    var fpsNum: i64 = (2 * 27000000) / gcd;
+    //    var fpsDen: i64 = picture.nb_fields * seq.frame_period / gcd;
+    //
+    //    vs.vsh_reduceRational(&fpsNum, &fpsDen);
+    //    //swapped because duration and not fps
+    //    _ = vsapi.*.mapSetInt.?(map, "_DurationNum", fpsDen, vs.maReplace);
+    //    _ = vsapi.*.mapSetInt.?(map, "_DurationDen", fpsNum, vs.maReplace);
+    //}
 
     //Color stuff
     {
@@ -530,7 +564,7 @@ fn writeFbufToVsframe(f: ?*vs.VSFrame, vsapi: [*c]const vs.VSAPI, fbuf: mpeg2.mp
 
 pub fn seqToVideoInfo(seq: *mpeg2.mpeg2_sequence_t, num_frames: c_int) vs.VSVideoInfo {
     const gcd = std.math.gcd(27000000, seq.frame_period);
-    return vs.VSVideoInfo{
+    var vi = vs.VSVideoInfo{
         .format = undefined,
         .fpsNum = 27000000 / gcd,
         .fpsDen = seq.frame_period / gcd,
@@ -538,4 +572,5 @@ pub fn seqToVideoInfo(seq: *mpeg2.mpeg2_sequence_t, num_frames: c_int) vs.VSVide
         .height = @intCast(seq.height),
         .numFrames = num_frames,
     };
+    return vi;
 }

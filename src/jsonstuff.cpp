@@ -78,6 +78,9 @@ json process_pgcit(pgcit_t *pgcit) {
 
 extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
                            const char *dvdpath, uint32_t current_vts) {
+  if (!dvd) {
+    printf("DVD IS NULL\n");
+  }
   auto ifo = ifoOpen(dvd, 0);
 
   json a;
@@ -152,6 +155,40 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
       vts["vts_ptt_srpt"] = titles;
     } else {
       vts["vts_ptt_srpt"] = json::array();
+    }
+
+    if (ifo2->vtsi_mat) {
+      auto vtsi_mat = ifo2->vtsi_mat;
+      auto va = vtsi_mat->vts_video_attr;
+      json jj;
+
+      json vts_video_attr;
+
+      uint16_t asd = vtsi_mat->vts_video_attr.mpeg_version;
+      vts_video_attr["mpeg_version"] = (int64_t)va.mpeg_version;
+      vts_video_attr["video_format"] = (int64_t)va.video_format;
+      vts_video_attr["picture_size"] = (int64_t)va.picture_size;
+
+      jj["vts_video_attr"] = vts_video_attr;
+      vts["vtsi_mat"] = jj;
+    }
+
+    if (ifo2->vts_c_adt) {
+      auto vts_c_adt = ifo2->vts_c_adt;
+      json jj = json::array();
+
+      for (int vob = 0; vob < vts_c_adt->nr_of_vobs; vob++) {
+        auto vobus = vts_c_adt->cell_adr_table[vob];
+        json dd;
+
+        dd["cell_id"] = vobus.cell_id;
+        dd["vob_id"] = vobus.vob_id;
+        dd["last_sector"] = vobus.last_sector;
+        dd["start_sector"] = vobus.start_sector;
+        jj.push_back(dd);
+      }
+
+      vts["vts_c_adt"] = jj;
     }
 
     ifos.push_back(vts);

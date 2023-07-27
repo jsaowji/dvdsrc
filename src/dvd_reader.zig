@@ -10,6 +10,7 @@ export fn dummy_loggerfn(a: ?*anyopaque, b: dvdread.dvd_logger_level_t, c: [*c]c
 }
 pub const dummy_logger = dvdread.dvd_logger_cb{
     .pf_log = &dummy_loggerfn,
+    //.pf_log = null,
 };
 
 pub const DVD_BLOCK_SIZE: u16 = @intCast(dvdread.DVD_VIDEO_LB_LEN);
