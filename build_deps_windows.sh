@@ -7,6 +7,7 @@ wget -nc http://download.videolan.org/pub/videolan/libdvdread/last/libdvdread-6.
 rm -rf libmpeg2-0.5.1
 rm -rf libdvdread-6.1.3
 rm -rf libdvdread-6.1.3
+rm -rf vapoursynth-R62
 
 tar -xvf libdvdread-6.1.3.tar.bz2
 tar -xvf libmpeg2-0.5.1.tar.gz
@@ -22,3 +23,8 @@ cd ..
 
 cp libmpeg2-0.5.1/libmpeg2/.libs/libmpeg2.a .
 cp libdvdread-6.1.3/.libs/libdvdread.a .
+
+mv vapoursynth-R62/include/ vapoursynth-R62/lolol/
+mkdir vapoursynth-R62/include/
+mkdir vapoursynth-R62/include/vapoursynth
+mv vapoursynth-R62/lolol/*.h vapoursynth-R62/include/vapoursynth

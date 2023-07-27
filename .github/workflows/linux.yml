@@ -1,0 +1,44 @@
+name: Build (on Linux for windows)
+
+on:
+  push:
+    paths:
+      - 'src/*'
+      - build.zig
+      - '.github/workflows/linux.yml'
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: goto-bus-stop/setup-zig@v2
+    - name: zigasd
+      run: echo $(which zig)
+
+    - name: Checkout repo
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    
+    - name: Build dependencies
+      run: sh build_deps_windows.sh
+
+    - name: Download json hpp headers
+      run: wget -q -O src/bindings/json.hpp https://github.com/nlohmann/json/releases/download/v3.7.3/json.hpp
+
+    - name: Setup bindings
+      run: sh setup_bindings_windows.sh
+    
+    - name: build
+      run: zig build -Dtarget=x86_64-windows -Doptimize=ReleaseSafe
+
+    - name: Upload stuff
+      uses: actions/upload-artifact@v3
+      if: true
+      with:
+        name: windowslibdvdsrcso
+        path: |
+          pydvdcompanion.py
+          vspreview_dvd.ppy
+          zig-out/lib/*.so
