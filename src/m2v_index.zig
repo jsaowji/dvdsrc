@@ -125,6 +125,8 @@ pub const OutGopInfo = struct {
     frame_cnt: u8 = 0,
     frames: [30]Frame = undefined, //in decode order
 
+    indexing_only_slicecnt: u8 = 0,
+
     pub fn writeOut(self: *const Self, ww: anytype) !void {
         try ww.writeIntLittle(u64, self.sequence_info_start);
 

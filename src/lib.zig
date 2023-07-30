@@ -418,12 +418,99 @@ const VobToFile = struct {
         var bufwrite = std.io.bufferedWriter(file.writer());
         defer bufwrite.flush() catch unreachable;
 
-        var buffer: [2048]u8 = undefined;
+        const dontVideo = true;
 
-        for (0..@as(usize, @intCast(sector_cnt))) |sector_i| {
-            const sector = vsapi.*.mapGetInt.?(in, "sectors", @as(c_int, @intCast(sector_i)), 0);
-            _ = dvdread.DVDReadBlocks(dvdfile, @as(c_int, @intCast(sector)), 1, &buffer);
-            bufwrite.writer().writeAll(&buffer) catch unreachable;
+        if (dontVideo) {
+            const SectoReader = struct {
+                dvdfile: ?*dvdread.dvd_file_t,
+                buffer: [2048]u8 = undefined,
+                buffer_left: usize = 0,
+                sector_i: usize = 0,
+                sector_cnt: usize,
+                vsapi: [*c]const vs.VSAPI,
+                in: ?*const vs.VSMap,
+                const Self = @This();
+                pub const Error = error{AllRead};
+                pub const Reader = std.io.Reader(*Self, Error, read);
+
+                pub fn read(self: *Self, dest: []u8) !usize {
+                    if (self.buffer_left == 0) {
+                        if (self.sector_i == self.sector_cnt) return Error.AllRead;
+                        const sector = self.vsapi.*.mapGetInt.?(self.in, "sectors", @as(c_int, @intCast(self.sector_i)), 0);
+                        _ = dvdread.DVDReadBlocks(self.dvdfile, @as(c_int, @intCast(sector)), 1, &self.buffer);
+                        self.buffer_left = 2048;
+                        self.sector_i += 1;
+                    }
+                    var read_size = @min(self.buffer_left, dest.len);
+                    const start_ptr = 2048 - self.buffer_left;
+                    //std.debug.print("start_ptr {} read_size {} self.buffer_left {} dest {}\n", .{ start_ptr, read_size, self.buffer_left, dest.len });
+                    @memcpy(dest[0..read_size], self.buffer[start_ptr .. start_ptr + read_size]);
+                    self.buffer_left -= read_size;
+                    return read_size;
+                }
+
+                pub fn reader(self: *Self) Reader {
+                    return .{ .context = self };
+                }
+            };
+            var secto: SectoReader = .{
+                .vsapi = vsapi,
+                .in = in,
+
+                .dvdfile = dvdfile,
+                .sector_cnt = @as(usize, @intCast(sector_cnt)),
+            };
+            var buf = std.heap.c_allocator.alloc(u8, 2048 * 116) catch unreachable;
+
+            var read_in = secto.reader();
+
+            while (true) {
+                const st = utils.checkStartCode(read_in) catch break;
+
+                //pid filter out 0xE0
+                switch (st) {
+                    //pack header
+                    0xBA => {
+                        // read_in.skipBytes(10, .{}) catch unreachable;
+                        //we need to include this for some reason or else ffmpeg does weird stuff
+                        const data_read = read_in.readAtLeast(buf[0..10], 10) catch unreachable;
+                        std.debug.assert(data_read == 10);
+
+                        _ = bufwrite.writer().writeAll(&[_]u8{ 0, 0, 1, st }) catch unreachable;
+                        _ = bufwrite.writer().writeAll(buf[0..10]) catch unreachable;
+                    },
+                    0xBF, 0xBD, 0xBB, 0xBE => {
+                        const len = read_in.readIntBig(u16) catch unreachable;
+
+                        if (len > buf.len) {
+                            std.heap.c_allocator.free(buf);
+                            buf = std.heap.c_allocator.alloc(u8, len) catch unreachable;
+                        }
+                        const data_read = read_in.readAtLeast(buf[0..len], len) catch unreachable;
+                        std.debug.assert(data_read == len);
+
+                        _ = bufwrite.writer().writeAll(&[_]u8{ 0, 0, 1, st }) catch unreachable;
+                        bufwrite.writer().writeIntBig(u16, len) catch unreachable;
+                        _ = bufwrite.writer().writeAll(buf[0..len]) catch unreachable;
+                    },
+                    //video don't
+                    0xE0 => {
+                        var len = read_in.readIntBig(u16) catch unreachable;
+                        _ = read_in.skipBytes(len, .{}) catch unreachable;
+                    },
+                    else => {
+                        unreachable;
+                    },
+                }
+            }
+        } else {
+            var buffer: [2048]u8 = undefined;
+
+            for (0..@as(usize, @intCast(sector_cnt))) |sector_i| {
+                const sector = vsapi.*.mapGetInt.?(in, "sectors", @as(c_int, @intCast(sector_i)), 0);
+                _ = dvdread.DVDReadBlocks(dvdfile, @as(c_int, @intCast(sector)), 1, &buffer);
+                bufwrite.writer().writeAll(&buffer) catch unreachable;
+            }
         }
     }
 };

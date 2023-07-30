@@ -216,9 +216,11 @@ class PluginMain(AbstractPlugin, QWidget):
                 for i,e in enumerate(current_title):
                     a = e["pgcn"]
                     b = e["pgn"]
-                    c,d = rang.original_ranges[i]
-
-                    cells += f"pgcn {a}  pgn {b}  [{c} {d}]\n"
+                    if i >= len(rang.original_ranges):
+                        cells += f"[BAD] pgcn {a}  pgn {b}\n"
+                    else:
+                        c,d = rang.original_ranges[i]
+                        cells += f"pgcn {a}  pgn {b}  [{c} {d}]\n"
 
                 chapter_text1 = ""
                 for c in rang.chapters:

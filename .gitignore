@@ -13,6 +13,14 @@ dbg/
 *.bin
 *.zst
 *.a
+*.ac3
+*.vob
+*.mkv
+*.mka
+*.264
+*.265
+*.opus
+config.ini
 libdvdread-6.1.3
 libmpeg2-0.5.1
 vapoursynth-R62

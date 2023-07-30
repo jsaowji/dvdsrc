@@ -178,7 +178,7 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
       json jj = json::array();
 
       for (int kk = 0; kk < (vts_vobu_admap->last_byte + 1 - VOBU_ADMAP_SIZE) /
-                                sizeof(cell_adr_t);
+                                sizeof(uint32_t);
            kk++) {
         jj.push_back(vts_vobu_admap->vobu_start_sectors[kk]);
       }

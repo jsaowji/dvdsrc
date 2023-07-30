@@ -28,6 +28,11 @@ fn fixGop(current_gop: *m2v_index.OutGopInfo) void {
         }
         std.debug.assert(current_gop.frames[i].temporal_reference < current_gop.frame_cnt);
     }
+
+    //if (current_gop.indexing_only_slicecnt < current_gop.frame_cnt) {
+    //    std.debug.print("WARNING FOUND GOP WITH MORE PICUTRE THAN SLICE slice {} frame {}\n", .{ current_gop.indexing_only_slicecnt, current_gop.frame_cnt });
+    //    current_gop.frame_cnt -= 1;
+    //}
 }
 
 fn M2vIndexer(comptime GopBufWriter: type) type {
@@ -111,6 +116,7 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                             self.slice_cnt += 1;
                             self.total_framecnt += 1;
                         }
+                        current_gop.indexing_only_slicecnt += 1;
                     },
                     mpeg2.STATE_PICTURE => {
                         const FrameType = m2v_index.FrameType;
@@ -174,6 +180,7 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
 
                         current_gop.closed = (gop.flags & mpeg2.GOP_FLAG_CLOSED_GOP) != 0;
                         current_gop.frame_cnt = 0;
+                        current_gop.indexing_only_slicecnt = 0;
                         current_gop.frames = undefined;
 
                         //Holy shit whyyyyyyyyy

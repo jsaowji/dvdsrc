@@ -1,9 +1,123 @@
-from typing import Tuple
+from typing import List, Tuple
 import vstools
 import functools
-from vstools import vs
-
+from vstools import vs,core
+import os
 import json
+
+
+
+#def pydvd.LoadT(path:str)
+# Loads first angle of first title (entry in VMG TT_SRPT)
+
+#def pydvd.LoadT(path:str, title: int, angle:int = 1)
+# title=2 Loads first angle of second title
+# title=2 angle=2 Loads second angle of second title
+
+#def pydvd.LoadP(path:str, vts: int, pgc:int, angle:int = 1)
+#vts=1 pgc=1 Loads first PGC in VTS_01_*.VOB
+
+#def pydvd.Load(path:str, vts: int, cells: List[Tuple[int,int]]})
+#vts=1 cells=[(1, 1), (1, 2), (1, 3)] Loads specific (Vob, Cell)s from VTS_01_*.VOB
+
+#def pydvd.Load(path:str, vts: int, pgc: int, cells: List[int]
+#vts = 1, pgc=1,cells=[1,2] Loads the first and 2nd cell from pgc 1 from VTS_01_1..x.VOB
+
+#TODO: what should these return 
+# vs.VideoNode ?
+# object like ExtractPgc, with chaptermarks, audiohelper functions 
+
+class ExtractPgc:
+    def __init__(self, dvdpath: str, vts: int, pgc_n: int, angle_n: int = 0, cells_n: List[int] = None) -> dict:
+        node = core.dvdsrc.Full(dvdpath,vts,1)
+        compa = DvdCompanion(node)
+        current_ifo = compa.json["ifos"][vts]
+
+        pgc = current_ifo["pgcs"][pgc_n - 1]
+        cell_position = pgc["cell_position"]
+
+        cells_sectors = map(lambda c: get_sectorranges_for_vobcellpair(current_ifo,c["cell_nr"],c["vob_id_nr"]),cell_position)
+        cells_sectors = list(cells_sectors)
+
+
+        frame_ranges = []
+        chapter_marks = []
+        sector_ranges = []
+        
+        angle_i = 0
+
+        nama =  enumerate(pgc["cell_playback"])
+        if cells_n is not None:
+            nama = [ ]
+            for i,a in enumerate(pgc["cell_playback"]):
+                if (i+1) in cells_n:
+                    nama += [ (i,a) ]
+
+        for i,c in nama:
+            inleaved = c["interleaved"]
+
+            if not inleaved:
+                angle_i = 0
+            else:
+                angle_i += 1        
+            if angle_i == angle_n or (not inleaved):
+                for rangey in cells_sectors[i]:
+                    start,end = get_frame_range_between_first_last_sector(compa.framezz,rangey[0],rangey[1])
+                    frame_ranges  += [ (start,end) ]
+                if (i+1) in pgc["program_map"]:
+                    chapter_marks += [ start ]
+                sector_ranges += cells_sectors[i]
+
+        self.dvdpath = dvdpath
+        self.vts = vts
+        self.node = node
+        self.frame_ranges = frame_ranges
+        self.chapter_marks = chapter_marks
+        self.sector_ranges = sector_ranges
+
+        #print(len(self.node), len(compa.framezz) )
+        assert len(self.node) == len(compa.framezz) 
+    
+    def muxtools_chapters(self):
+        from vsmuxtools import Chapters
+        return Chapters(list(map(lambda x: (x,None), self.chapter_marks)),fps=self.node.fps)
+    
+    def muxtools_audio(self,audio_index: int = 0):
+        from vsmuxtools import do_audio
+        from tempfile import TemporaryDirectory
+        
+        with TemporaryDirectory() as temp_dir:
+            tmpvob = os.path.join(temp_dir,"vob.vob")
+
+            self.dump_to_file(tmpvob)
+            epaudio = do_audio(tmpvob, audio_index)
+        
+        return epaudio
+    
+    def muxtools_audios(self,audio_indexs: List[int]):
+        from vsmuxtools import do_audio
+        from tempfile import TemporaryDirectory
+        
+        with TemporaryDirectory() as temp_dir:
+            tmpvob = os.path.join(temp_dir,"vob.vob")
+            tmpvob = "/tmp/asd.vob"
+            self.dump_to_file(tmpvob)
+            print(tmpvob)
+            
+            epaudios = list(map(lambda x: do_audio(tmpvob, x),audio_indexs))
+        
+        return epaudios
+
+    def final_video_node(self) -> vs.VideoNode:
+        return cut_node_on_ranges(self.node,self.frame_ranges)
+    
+    def dump_to_file(self, outfile: str):
+        secstors = []
+        for a in self.sector_ranges:
+            for b in range(a[0],a[1]+1):
+                secstors += [ b ]
+        
+        core.dvdsrc.VobToFile(self.dvdpath,self.vts,1,secstors,outfile)
 
 class DvdCompanion:
     def __init__(self,node: vs.VideoNode):
@@ -15,6 +129,12 @@ class DvdCompanion:
         self.angle = DvdCompanion.extract_angle(self.frame0.props)
 
         self.vobidframedict = create_vobids_framedict(self.vobid)
+
+        if len(self.framezz) > len(node):
+            self.framezz = self.framezz[0:len(node)]
+            print("Slicing down framezz, this could be an indecation that the sourcefilter failed somehow")
+
+
 
     def __extract_binary_from_prps(prps,nam:str,datatype: str):
         framezz = None
@@ -28,6 +148,7 @@ class DvdCompanion:
                     ss = 1
                 if datatype == "H":
                     ss = 2
+                assert (sz % ss) == 0
                 cnt = sz // ss
 
                 framezz = struct.unpack(f"<{cnt}{datatype}",data[8:8 + sz])
@@ -128,20 +249,21 @@ class Ranger:
                     break
         self.ranges = ranges
 
-def get_frames_for_interleaved_cell(framezz, vobiddict, playback, position) -> list[int]:
-    first,last = get_range_for_normal_cell(framezz,playback)
-    frames = vobiddict[position["vob_id_nr"]]
-    filtered = list(filter(lambda f: f >= first and f <= last, frames))
-    if len(filtered) != len(frames) or len(filtered) != len(frames):
-        print("mismatch between filtered and frames")
-        print("this breaks a assumption the a single angle cell is a single vobid")
+##def get_frames_for_interleaved_cell(framezz, vobiddict, playback, position) -> list[int]:
+##    first,last = get_range_for_normal_cell(framezz,playback)
+##    frames = vobiddict[position["vob_id_nr"]]
+##    filtered = list(filter(lambda f: f >= first and f <= last, frames))
+##    if len(filtered) != len(frames) or len(filtered) != len(frames):
+##        print("mismatch between filtered and frames")
+##        print("this breaks a assumption the a single angle cell is a single vobid")
+##
+##        
+##        print("FILTERED")
+##        print(filtered)
+##        print("FRAMES")
+##        print(frames)
+##    return filtered
 
-        
-        print("FILTERED")
-        print(filtered)
-        print("FRAMES")
-        print(frames)
-    return filtered
 
 
 def get_frame_range_between_first_last_sector(framezz: list[int],first_sector: int,last_sector: int) -> Tuple[int,int]:
