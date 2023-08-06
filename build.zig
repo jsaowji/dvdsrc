@@ -17,13 +17,13 @@ pub fn build(b: *std.Build) void {
     if (!target.isWindows()) {
         lib.linkSystemLibraryName("dvdread");
         lib.linkSystemLibraryName("mpeg2");
-        lib.addCSourceFile("./src/jsonstuff.cpp", &[_][]const u8{});
+        lib.addCSourceFile(.{ .file = .{ .path = "./src/jsonstuff.cpp" }, .flags = &[_][]const u8{} });
     } else {
-        lib.addObjectFile("./libdvdread.a");
-        lib.addObjectFile("./libmpeg2.a");
+        lib.addObjectFile(.{ .path = "./libdvdread.a" });
+        lib.addObjectFile(.{ .path = "./libmpeg2.a" });
 
-        lib.addIncludePath("libdvdread-6.1.3/src");
-        lib.addCSourceFile("./src/jsonstuff.cpp", &[_][]const u8{"-mno-ms-bitfields"});
+        lib.addIncludePath(.{ .path = "libdvdread-6.1.3/src" });
+        lib.addCSourceFile(.{ .file = .{ .path = "./src/jsonstuff.cpp" }, .flags = &[_][]const u8{"-mno-ms-bitfields"} });
     }
     b.installArtifact(lib);
 }

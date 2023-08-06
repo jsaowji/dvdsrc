@@ -449,6 +449,8 @@ def dvdtime_to_s(dt: dict):
     return ms
 
 
+
+#this assumes progressive_sequence 0
 def apply_rff(node: vs.VideoNode, rff: List[int], tff: List[int]):
     assert len(node) == len(rff)
     assert len(rff) == len(tff)
@@ -481,7 +483,8 @@ def apply_rff(node: vs.VideoNode, rff: List[int], tff: List[int]):
         bf = fields[a*2+1]
         assert tf["tf"] != bf["tf"]
 
-    fields = list(map(lambda x: x["n"],fields))
+    fields = [x["n"] for x in fields]
+
 
     remap_frames = fields
     node = tfffs
