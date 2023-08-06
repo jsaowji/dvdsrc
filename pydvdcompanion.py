@@ -74,6 +74,7 @@ class ExtractPgc:
         self.frame_ranges = frame_ranges
         self.chapter_marks = chapter_marks
         self.sector_ranges = sector_ranges
+        self.compa = compa
 
         #print(len(self.node), len(compa.framezz) )
         assert len(self.node) == len(compa.framezz) 
@@ -100,9 +101,7 @@ class ExtractPgc:
         
         with TemporaryDirectory() as temp_dir:
             tmpvob = os.path.join(temp_dir,"vob.vob")
-            tmpvob = "/tmp/asd.vob"
             self.dump_to_file(tmpvob)
-            print(tmpvob)
             
             epaudios = list(map(lambda x: do_audio(tmpvob, x),audio_indexs))
         
@@ -111,6 +110,14 @@ class ExtractPgc:
     def final_video_node(self) -> vs.VideoNode:
         return cut_node_on_ranges(self.node,self.frame_ranges)
     
+    def final_video_node_rff(self) -> vs.VideoNode:
+        rff = cut_array_on_ranges(self.compa.rff,self.frame_ranges)
+        tff = cut_array_on_ranges(self.compa.tff,self.frame_ranges)
+        
+        node = cut_node_on_ranges(self.node,self.frame_ranges)
+        
+        return apply_rff(node,rff,tff)
+
     def dump_to_file(self, outfile: str):
         secstors = []
         for a in self.sector_ranges:
@@ -121,20 +128,21 @@ class ExtractPgc:
 
 class DvdCompanion:
     def __init__(self,node: vs.VideoNode):
+        self.node = node
         self.frame0 = node.get_frame(0)
         self.json_str = DvdCompanion.extract_json(self.frame0.props)
         self.json = json.loads(self.json_str)
         self.framezz = DvdCompanion.extract_framezz(self.frame0.props)
         self.vobid = DvdCompanion.extract_vobid(self.frame0.props)
         self.angle = DvdCompanion.extract_angle(self.frame0.props)
+        self.rff = DvdCompanion.__extract_binary_from_prps(self.frame0.props,"_RffFrame","B")
+        self.tff = DvdCompanion.__extract_binary_from_prps(self.frame0.props,"_TffFrame","B")
 
         self.vobidframedict = create_vobids_framedict(self.vobid)
 
         if len(self.framezz) > len(node):
             self.framezz = self.framezz[0:len(node)]
             print("Slicing down framezz, this could be an indecation that the sourcefilter failed somehow")
-
-
 
     def __extract_binary_from_prps(prps,nam:str,datatype: str):
         framezz = None
@@ -264,8 +272,6 @@ class Ranger:
 ##        print(frames)
 ##    return filtered
 
-
-
 def get_frame_range_between_first_last_sector(framezz: list[int],first_sector: int,last_sector: int) -> Tuple[int,int]:
     first = None
     last = None
@@ -300,7 +306,7 @@ def cut_node(node: vs.VideoNode,frames: list[int]) -> vs.VideoNode:
     return cut_node_on_ranges(node,ranges)
 
 
-def cut_node_on_ranges(node: vs.VideoNode,ranges) -> vs.VideoNode:
+def cut_node_on_ranges(node: vs.VideoNode, ranges) -> vs.VideoNode:
     remap_frames = tuple[int, ...]([
         x for y in [
             range(rrange[0], rrange[1] + 1) for rrange in ranges
@@ -313,6 +319,17 @@ def cut_node_on_ranges(node: vs.VideoNode,ranges) -> vs.VideoNode:
         return leldvd[lelremap_frames[n]]
 
     return blank.std.FrameEval(functools.partial(ele,leldvd=node,lelremap_frames=remap_frames))
+
+def cut_array_on_ranges(array: List[int], ranges) -> vs.VideoNode:
+    remap_frames = tuple[int, ...]([
+        x for y in [
+            range(rrange[0], rrange[1] + 1) for rrange in ranges
+        ] for x in y
+    ])
+    newarray = []
+    for i in remap_frames:
+        newarray += [ array[i] ]
+    return newarray 
 
 def open_dvd_somehow(path):
     new_node = None
@@ -347,6 +364,13 @@ def get_sectorranges_for_vobcellpair(current_vts:dict,cell_id:int,vob_id: int):
         #    break
     return ranges
 
+def get_frameranges_for_vobcellpair(current_vts:dict,cell_id:int,vob_id: int,framezz: List[int]):
+    secs = get_sectorranges_for_vobcellpair(current_vts,cell_id,vob_id)
+    framez = []
+    for rangey in secs:
+        start,end = get_frame_range_between_first_last_sector(framezz,rangey[0],rangey[1])
+        framez += [ (start,end) ]
+    return framez
 
 # saves frame an sector range
 def calculate_frame_range_for_title(framezz,current_vts:dict,current_title: dict,angle_index: int = 0):
@@ -423,3 +447,55 @@ def dvdtime_to_s(dt: dict):
         ms += frames / fps
 
     return ms
+
+
+def apply_rff(node: vs.VideoNode, rff: List[int], tff: List[int]):
+    assert len(node) == len(rff)
+    assert len(rff) == len(tff)
+
+    fields = []
+    tfffs = core.std.SeparateFields(core.std.RemoveFrameProps(node,props=["_FieldBased","_Field"]),tff=True)
+
+    for i in range(len(rff)):
+        current_tff = tff[i]
+
+        if current_tff:
+            current_bff = 0
+        else:
+            current_bff = 1
+
+        if current_tff == 1:
+            first_field  = 2*i
+            second_field = 2*i+1
+        else:#bff
+            first_field  = 2*i+1
+            second_field = 2*i
+
+        fields += [ {"n":first_field,"tf": current_tff}, {"n":second_field,"tf": current_bff} ]
+        if rff[i] == 1:
+            fields += [ fields[-2] ]
+
+    assert (len(fields) % 2) == 0
+    for a in range(len(fields) // 2):
+        tf = fields[a*2] 
+        bf = fields[a*2+1]
+        assert tf["tf"] != bf["tf"]
+
+    fields = list(map(lambda x: x["n"],fields))
+
+    remap_frames = fields
+    node = tfffs
+
+    blank = node.std.BlankClip(length=len(remap_frames))
+
+    def ele(n,leldvd,lelremap_frames):
+        return leldvd[lelremap_frames[n]]
+
+    final = blank.std.FrameEval(functools.partial(ele,leldvd=node,lelremap_frames=remap_frames))
+
+    final = core.std.RemoveFrameProps(final,props=["_FieldBased","_Field"])
+    woven = core.std.DoubleWeave(final, tff=True)
+    woven = core.std.SelectEvery(woven, 2, 0)
+    woven = core.std.SetFieldBased(woven, 2)
+
+    return woven

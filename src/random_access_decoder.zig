@@ -22,10 +22,11 @@ pub fn RandomAccessDecoder(comptime M2vReaderType: type) type {
 
         video_info: vs.VSVideoInfo,
 
-        file_frame_position_frame: ?*vs.VSFrame = null,
-        json_frame: ?*vs.VSFrame = null,
-        vobid_frame: ?*vs.VSFrame = null,
-        angle_frame: ?*vs.VSFrame = null,
+        extra_data_frames: [6]?struct {
+            name: [*:0]const u8,
+            frame: ?*vs.VSFrame,
+        },
+        seq: ?mpeg2.mpeg2_sequence_t = null,
 
         guess_ar: bool,
         fake_vfr: bool,
@@ -99,6 +100,8 @@ pub fn RandomAccessDecoder(comptime M2vReaderType: type) type {
                         var frame = vv.frame;
                         ds.cache[i] = null;
 
+                        self.applyFrameFrameProps(frame, vsapi);
+
                         var map = vsapi.*.getFramePropertiesRW.?(frame).?;
                         if (n_display_order == 0) {
                             _ = vsapi.*.mapSetInt.?(map, "_ATOTAL_TFF", @as(i64, @intCast(self.gopy.framestats.tff)), vs.maReplace);
@@ -106,23 +109,71 @@ pub fn RandomAccessDecoder(comptime M2vReaderType: type) type {
                             _ = vsapi.*.mapSetInt.?(map, "_ATOTAL_Progressive", @as(i64, @intCast(self.gopy.framestats.prog)), vs.maReplace);
                         }
 
-                        if (self.file_frame_position_frame) |a| {
-                            _ = vsapi.*.mapSetFrame.?(map, "_FileFramePositionFrame", a, 1);
-                        }
-                        if (self.json_frame) |a| {
-                            _ = vsapi.*.mapSetFrame.?(map, "_JsonFrame", a, 1);
-                        }
-                        if (self.vobid_frame) |a| {
-                            _ = vsapi.*.mapSetFrame.?(map, "_VobIdFrame", a, 1);
-                        }
-                        if (self.angle_frame) |a| {
-                            _ = vsapi.*.mapSetFrame.?(map, "_AngleFrame", a, 1);
-                        }
                         return frame;
                     }
                 }
             }
             unreachable;
+        }
+
+        pub fn getframe_exit_early(self: *Self, n_display_order: u64, vsapi: [*c]const vs.VSAPI, core: ?*vs.VSCore) ?*vs.VSFrame {
+            const gopl = self.gopy.lookuptable.items[n_display_order];
+            const wanted_gop = self.gopy.gops.items[gopl.gop];
+            const wanted_frame = wanted_gop.frames[gopl.decode_frame_offset];
+
+            if (wanted_frame.invalid) {
+                debugPrint("Patched bad frame {}\n", .{n_display_order});
+                var f = vsapi.*.newVideoFrame.?(&self.video_info.format, self.video_info.width, self.video_info.height, null, core).?;
+
+                {
+                    var wp0 = vsapi.*.getWritePtr.?(f, 0);
+                    var wp1 = vsapi.*.getWritePtr.?(f, 1);
+                    var wp2 = vsapi.*.getWritePtr.?(f, 2);
+
+                    var st0 = @as(usize, @intCast(vsapi.*.getStride.?(f, 0)));
+                    var st1 = @as(usize, @intCast(vsapi.*.getStride.?(f, 1)));
+                    var st2 = @as(usize, @intCast(vsapi.*.getStride.?(f, 2)));
+
+                    var ww = @as(usize, @intCast(self.video_info.width));
+                    var hh = @as(usize, @intCast(self.video_info.height));
+
+                    //TODO: vapoursynth helpers bitblt
+                    for (0..hh) |h| {
+                        const dlp = wp0 + h * st0;
+
+                        @memset(dlp[0..ww], 16);
+                    }
+                    for (0..hh / 2) |h| {
+                        const dlp = wp1 + h * st1;
+
+                        @memset(dlp[0 .. ww / 2], 128);
+                    }
+                    for (0..hh / 2) |h| {
+                        const dlp = wp2 + h * st2;
+
+                        @memset(dlp[0 .. ww / 2], 128);
+                    }
+                }
+                putprops(f, vsapi, null, self.seq.?, &wanted_frame, 0, 0, false, self.fake_vfr, self.guess_ar);
+
+                var map = vsapi.*.getFramePropertiesRW.?(f).?;
+                _ = vsapi.*.mapSetInt.?(map, "_BADBADBADBAD", 1, 1);
+
+                self.applyFrameFrameProps(f, vsapi);
+
+                return f;
+            }
+            return null;
+        }
+
+        fn applyFrameFrameProps(self: *Self, f: *vs.VSFrame, vsapi: [*c]const vs.VSAPI) void {
+            var map = vsapi.*.getFramePropertiesRW.?(f).?;
+
+            for (self.extra_data_frames) |a| {
+                if (a) |b| {
+                    _ = vsapi.*.mapSetFrame.?(map, b.name, b.frame, 1);
+                }
+            }
         }
 
         pub fn prefetchFrame(self: *Self, n_display_order: u64, vsapi: [*c]const vs.VSAPI, core: ?*vs.VSCore) void {
@@ -437,7 +488,9 @@ fn writeFbufToVsframe(f: ?*vs.VSFrame, vsapi: [*c]const vs.VSAPI, picture: *cons
             @memcpy(dlp[0..seq.chroma_width], slp[0..seq.chroma_width]);
         }
     }
-
+    putprops(f, vsapi, picture, seq, frm, index_in_gop, gop, gop_closed, vfr, guess_ar);
+}
+fn putprops(f: ?*vs.VSFrame, vsapi: [*c]const vs.VSAPI, picture: ?*const mpeg2.mpeg2_picture_t, seq: mpeg2.mpeg2_sequence_t, frm: *const m2v_index.Frame, index_in_gop: u8, gop: u64, gop_closed: bool, vfr: bool, guess_ar: bool) void {
     var map = vsapi.*.getFramePropertiesRW.?(f).?;
     if (!frm.progressive) {
         if (frm.tff) {

@@ -15,7 +15,27 @@ import os
 import json
 
 from pydvdcompanion import *
+from dataclasses import dataclass
 
+
+class Cell:
+    cell_id: int
+    last_sector: int
+    start_sector: int
+    
+    def __init__(self, cell_id: int, last_sector: int,start_sector: int):
+        self.cell_id = cell_id
+        self.last_sector = last_sector
+        self.start_sector = start_sector
+
+class VobId:
+    vob_id: int
+    cells: List[Cell]
+
+    def __init__(self, vob_id: int, cells: List[Cell]):
+        self.vob_id = vob_id
+        self.cells = cells
+                    
 __all__ = [
     'PluginMain',
     'PluginJSON',
@@ -164,7 +184,6 @@ class PluginMain(AbstractPlugin, QWidget):
         if self.json["current_vts"] == vts:
             framezz = self.framezz
         else:
-            print("vts not same need to open new Full")
             prps = vs.core.dvdsrc.Full(self.json["dvdpath"],vts=vts,domain=1).get_frame(0).props
             framezz = DvdCompanion.extract_framezz(prps)
 
@@ -175,10 +194,49 @@ class PluginMain(AbstractPlugin, QWidget):
     def item_selected(self,a):
         dta = a.data(0,Qt.UserRole)
         if dta is not None:
+            if dta["type"] == "fullvob":
+                vts    = dta["vts"]
+                domain = dta["domain"]
+                if domain == 0:
+                    self.label.setPlainText("not impl")
+                    return
+                current_vts = self.json["ifos"][vts]
+                adt = current_vts["vts_c_adt"]
+
+                txt = "Cells:\n"
+                vobids = dict()
+                vobids: List[VobId] = []
+                
+                current_vobid = VobId(None,[])
+
+                for a in adt:
+                    vob_id = a["vob_id"]
+                    cell_id = a["cell_id"]
+
+
+                    if current_vobid.vob_id is None or current_vobid.vob_id != vob_id:
+                        if current_vobid.vob_id != None:
+                            vobids += [ current_vobid ]
+                        current_vobid = VobId(vob_id,[])
+                    current_vobid.cells += [ Cell(cell_id,a["last_sector"],a["start_sector"])]
+                vobids += [ current_vobid ]
+                
+                for a in vobids:
+                    txt += "Vobid: {} cells: {}\n".format(a.vob_id,list(map(lambda x: x.cell_id,a.cells)))
+                    if vts == self.json["current_vts"]:
+                        for c in a.cells:
+                            frms = get_frameranges_for_vobcellpair(current_vts,c.cell_id,a.vob_id,self.framezz)
+                            txt += "cell {}: {}\n".format(c.cell_id,frms)
+
+
+                self.label.setPlainText(txt)
+
+
+
             if dta["type"] == "title":
-                vts = dta["vts"]
+                vts   = dta["vts"]
                 title = dta["title"]
-                tnr = dta["absolute_title_number"]
+                tnr   = dta["absolute_title_number"]
 
                 current_ttsrp = self.json["ifos"][0]["tt_srpt"][tnr-1]
                 current_vts = self.json["ifos"][vts]
@@ -213,15 +271,45 @@ class PluginMain(AbstractPlugin, QWidget):
                 nr_of_ptts = current_ttsrp["nr_of_ptts"]
 
                 cells = ""
+
+                only_one_pgc = True
+                pgns = []
                 for i,e in enumerate(current_title):
                     a = e["pgcn"]
                     b = e["pgn"]
+                    
+                    pgns += [ b ]
+
                     if i >= len(rang.original_ranges):
                         cells += f"[BAD] pgcn {a}  pgn {b}\n"
                     else:
                         c,d = rang.original_ranges[i]
                         cells += f"pgcn {a}  pgn {b}  [{c} {d}]\n"
+                    
+                    if only_one_pgc and i != 0:
+                        if current_title[i-1]["pgcn"] != current_title[i]["pgcn"]:
+                            only_one_pgc = False
 
+
+                all_programs_contained = True
+                if only_one_pgc:
+                    pgcn = current_title[0]["pgcn"]
+                    
+                    pgm = current_vts["pgcs"][pgcn-1]["program_map"]
+
+                    if len(pgm) == len(pgns):
+                        for ii,a in enumerate(pgns):
+                            if ii +1 != a:
+                                print(ii)
+                                all_programs_contained = False
+                                break
+                    else:
+                        all_programs_contained = False
+                        print("b")
+
+
+
+                
                 chapter_text1 = ""
                 for c in rang.chapters:
                     chapter_text1 += f"{c}\n"
@@ -232,9 +320,13 @@ class PluginMain(AbstractPlugin, QWidget):
                 require_load = f"""Chapters: {nr_of_ptts}
 Framerange: {framerange}
 Time: {totaltime}
+Only one pgc: {only_one_pgc}
+All programs contained: {all_programs_contained}
+
 Chapters (relative): 
 {chapter_text1}
-Contents: 
+Contents:
+
 {cells}"""
                 labeltext = f"""Titleset: {vts}
 Title: {titlenumber}
@@ -263,8 +355,6 @@ Angles: {angl_cnt}
                 new_node = vs.core.dvdsrc.Full(self.json["dvdpath"],vts=vts,domain=domain)
 
                 self.add_output(new_node,f"vts{vts}{dd}")
-
-
 
             if dta["type"] == "title":
                 vts = dta["vts"]

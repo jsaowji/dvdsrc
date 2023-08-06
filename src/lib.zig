@@ -31,7 +31,7 @@ const M2vFilter = struct {
         fn init(path: []const u8, video_info: vs.VSVideoInfo, goplookup: m2v_index.GopLookup, fconf: FilterConfiguration) Self {
             var file = std.fs.openFileAbsolute(path, .{}) catch unreachable;
 
-            return Self{
+            var ss = Self{
                 .file = file,
                 .video_info = video_info,
                 .randy = .{
@@ -41,8 +41,13 @@ const M2vFilter = struct {
                     .video_info = video_info,
                     .guess_ar = fconf.guess_ar,
                     .fake_vfr = fconf.fake_vfr,
+                    .extra_data_frames = undefined,
                 },
             };
+            for (0..ss.randy.extra_data_frames.len) |i| {
+                ss.randy.extra_data_frames[i] = null;
+            }
+            return ss;
         }
 
         fn deinit(
@@ -60,6 +65,9 @@ const M2vFilter = struct {
         _ = activationReason;
         var d: *M2vFilterData = @ptrCast(@alignCast(instanceData));
 
+        if (d.randy.getframe_exit_early(@as(u64, @intCast(n)), vsapi, core)) |a| {
+            return a;
+        }
         d.randy.prefetchFrame(@as(u64, @intCast(n)), vsapi, core);
         return d.randy.fetchFrame(@as(u64, @intCast(n)), vsapi);
     }
@@ -159,7 +167,7 @@ const FullFilter = struct {
             }
 
             var file = dvdread.DVDOpenFile(@as(*dvdread.dvd_reader_t, @ptrCast(dvd_r)), vts, domain);
-            return Self{
+            var ss = Self{
                 .file = file.?,
                 .dvd_r = dvd_r.?,
                 .video_info = video_info,
@@ -173,8 +181,11 @@ const FullFilter = struct {
                     .video_info = video_info,
                     .fake_vfr = fconf.fake_vfr,
                     .guess_ar = fconf.guess_ar,
+                    .extra_data_frames = undefined,
                 },
             };
+
+            return ss;
         }
 
         fn deinit(
@@ -194,6 +205,9 @@ const FullFilter = struct {
 
         var d = @as(*FullFilterData, @ptrCast(@alignCast(instanceData)));
 
+        if (d.randy.getframe_exit_early(@as(u64, @intCast(n)), vsapi, core)) |a| {
+            return a;
+        }
         d.randy.prefetchFrame(@as(u64, @intCast(n)), vsapi, core);
         return d.randy.fetchFrame(@as(u64, @intCast(n)), vsapi);
     }
@@ -202,17 +216,10 @@ const FullFilter = struct {
         _ = core;
         var d = @as(*FullFilterData, @ptrCast(@alignCast(instanceData)));
 
-        if (d.randy.file_frame_position_frame) |a| {
-            vsapi.*.freeFrame.?(a);
-        }
-        if (d.randy.json_frame) |a| {
-            vsapi.*.freeFrame.?(a);
-        }
-        if (d.randy.vobid_frame) |a| {
-            vsapi.*.freeFrame.?(a);
-        }
-        if (d.randy.angle_frame) |a| {
-            vsapi.*.freeFrame.?(a);
+        for (d.randy.extra_data_frames) |a| {
+            if (a) |b| {
+                vsapi.*.freeFrame.?(b.frame);
+            }
         }
 
         d.deinit(vsapi);
@@ -322,6 +329,8 @@ const FullFilter = struct {
         var f2 = vsapi.*.newVideoFrame.?(&format, 1920 * 1088, 1, null, core);
         var vobid_frame = vsapi.*.newVideoFrame.?(&format, f1sz, 1, null, core);
         var angle_frame = vsapi.*.newVideoFrame.?(&format, f1sz, 1, null, core);
+        var rff_frame = vsapi.*.newVideoFrame.?(&format, 1920 * 1088 * 3, 1, null, core);
+        var tff_frame = vsapi.*.newVideoFrame.?(&format, 1920 * 1088 * 3, 1, null, core);
 
         data.* = FullFilterData.init(dvd, @as(u8, @intCast(vts)), @as(u8, @intCast(domain)), vi, psidx, goplookup, .{
             .guess_ar = true,
@@ -363,11 +372,51 @@ const FullFilter = struct {
                 var file_sz = file.reader().readAll(f3_ptr[8..f1sz]) catch unreachable;
                 std.mem.writeIntSliceLittle(u64, f3_ptr[0..8], file_sz);
             }
+            {
+                var rff_ptr = vsapi.*.getWritePtr.?(rff_frame, 0);
+                var tff_ptr = vsapi.*.getWritePtr.?(tff_frame, 0);
+                var frame_cnt: u64 = 0;
+                for (goplookup.gops.items) |gp| {
+                    var offset = frame_cnt;
+                    for (0..gp.frame_cnt) |i| {
+                        rff_ptr[8 + offset + gp.frames[i].temporal_reference] = @intFromBool(gp.frames[i].repeat);
+                        tff_ptr[8 + offset + gp.frames[i].temporal_reference] = @intFromBool(gp.frames[i].tff);
+                        frame_cnt += 1;
+                    }
+                }
+                std.mem.writeIntSliceLittle(u64, rff_ptr[0..8], frame_cnt);
+                std.mem.writeIntSliceLittle(u64, tff_ptr[0..8], frame_cnt);
+            }
         }
-        data.*.randy.file_frame_position_frame = f1;
-        data.*.randy.json_frame = f2;
-        data.*.randy.vobid_frame = vobid_frame;
-        data.*.randy.angle_frame = angle_frame;
+        for (0..data.*.randy.extra_data_frames.len) |i| {
+            data.*.randy.extra_data_frames[i] = null;
+        }
+        data.*.randy.extra_data_frames[0] = .{
+            .name = "_FileFramePositionFrame",
+            .frame = f1,
+        };
+        data.*.randy.extra_data_frames[1] = .{
+            .name = "_JsonFrame",
+            .frame = f2,
+        };
+        data.*.randy.extra_data_frames[2] = .{
+            .name = "_VobIdFrame",
+            .frame = vobid_frame,
+        };
+        data.*.randy.extra_data_frames[3] = .{
+            .name = "_AngleFrame",
+            .frame = angle_frame,
+        };
+        data.*.randy.extra_data_frames[4] = .{
+            .name = "_RffFrame",
+            .frame = rff_frame,
+        };
+        data.*.randy.extra_data_frames[5] = .{
+            .name = "_TffFrame",
+            .frame = tff_frame,
+        };
+
+        data.*.randy.seq = seq;
     }
 };
 

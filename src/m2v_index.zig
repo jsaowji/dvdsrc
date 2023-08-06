@@ -62,6 +62,7 @@ pub const Frame = struct {
     tff: bool = false,
     repeat: bool = false,
     progressive: bool = false,
+    invalid: bool = false,
 
     pub fn writeOut(self: *const Self, r: anytype) !void {
         var bw = std.io.bitWriter(std.builtin.Endian.Little, r);
@@ -84,9 +85,12 @@ pub const Frame = struct {
         if (self.progressive) {
             flag |= 8;
         }
+        if (self.invalid) {
+            flag |= 16;
+        }
 
-        try bw.writeBits(flag, 4);
-        try bw.writeBits(@as(u8, 0), 2); //padd to 8
+        try bw.writeBits(flag, 5);
+        try bw.writeBits(@as(u8, 0), 1); //padd to 8
 
         try bw.writeBits(self.temporal_reference, 8);
         try bw.writeBits(self.real_temporal_reference, 8);
@@ -107,7 +111,8 @@ pub const Frame = struct {
         self.tff = (try br.readBitsNoEof(u8, 1)) != 0;
         self.repeat = (try br.readBitsNoEof(u8, 1)) != 0;
         self.progressive = (try br.readBitsNoEof(u8, 1)) != 0;
-        _ = try br.readBitsNoEof(u8, 2);
+        self.invalid = (try br.readBitsNoEof(u8, 1)) != 0;
+        _ = try br.readBitsNoEof(u8, 1);
 
         self.temporal_reference = try br.readBitsNoEof(u8, 8);
         self.real_temporal_reference = try br.readBitsNoEof(u8, 8);

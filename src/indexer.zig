@@ -11,6 +11,12 @@ const m2v_in_ps = @import("m2v_in_ps.zig");
 const debugPrint = utils.debugPrint;
 
 fn fixGop(current_gop: *m2v_index.OutGopInfo) void {
+    if (current_gop.indexing_only_slicecnt < current_gop.frame_cnt) {
+        std.debug.print("WARNING FOUND GOP WITH MORE PICUTRE THAN SLICE slice {} frame {} marking last as invalid \n", .{ current_gop.indexing_only_slicecnt, current_gop.frame_cnt });
+        //current_gop.frame_cnt -= 1;
+        current_gop.frames[current_gop.frame_cnt - 1].invalid = true;
+    }
+
     for (0..current_gop.frame_cnt) |i| {
         const currenttr = current_gop.frames[i].temporal_reference;
         if (currenttr >= current_gop.frame_cnt) {
@@ -22,17 +28,13 @@ fn fixGop(current_gop: *m2v_index.OutGopInfo) void {
                     maxi = tr;
                 }
             }
+            std.debug.print("fixing to {}\n", .{maxi + 1});
             current_gop.frames[i].temporal_reference = maxi + 1;
             std.debug.print("FOUND FUCKED UP TEMPORAL REFERENCE TRYING TO FIX\n", .{});
             std.debug.print("WILL ONLY WORK IF ITS THE ONE CASE I SAW\n", .{});
         }
         std.debug.assert(current_gop.frames[i].temporal_reference < current_gop.frame_cnt);
     }
-
-    //if (current_gop.indexing_only_slicecnt < current_gop.frame_cnt) {
-    //    std.debug.print("WARNING FOUND GOP WITH MORE PICUTRE THAN SLICE slice {} frame {}\n", .{ current_gop.indexing_only_slicecnt, current_gop.frame_cnt });
-    //    current_gop.frame_cnt -= 1;
-    //}
 }
 
 fn M2vIndexer(comptime GopBufWriter: type) type {
@@ -42,6 +44,9 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
         mpeg2dec: *mpeg2.mpeg2dec_t,
         total_framecnt: u64, //rename total slicecnt
         total_piccnt: u64,
+
+        gopcnt: u64 = 0,
+
         current_gop: m2v_index.OutGopInfo,
         wroteout_gop: bool,
         mpeg2_file_pos: u64,
@@ -162,6 +167,10 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                         if (current_gop.closed) {
                             curframe.decodable_wo_prev_gop = true;
                         }
+                        //First gop
+                        if (self.gopcnt == 1 and !curframe.decodable_wo_prev_gop) {
+                            curframe.invalid = true;
+                        }
 
                         curframe.repeat = (curpic.flags & mpeg2.PIC_FLAG_REPEAT_FIRST_FIELD) != 0;
                         curframe.tff = (curpic.flags & mpeg2.PIC_FLAG_TOP_FIELD_FIRST) != 0;
@@ -183,11 +192,7 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                         current_gop.indexing_only_slicecnt = 0;
                         current_gop.frames = undefined;
 
-                        //Holy shit whyyyyyyyyy
-                        //dvds are cursed
-                        if (self.total_piccnt == 0) {
-                            current_gop.closed = true;
-                        }
+                        self.gopcnt += 1;
 
                         self.slice_cnt = 0;
                         self.wroteout_gop = false;
