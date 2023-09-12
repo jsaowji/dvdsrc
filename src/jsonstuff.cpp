@@ -30,6 +30,10 @@ json process_pgcit(pgcit_t *pgcit) {
     jpgc["nr_of_cells"] = pgc->nr_of_cells;
     jpgc["nr_of_programs"] = pgc->nr_of_programs;
 
+    jpgc["next_pgc_nr"] = pgc->next_pgc_nr;
+    jpgc["prev_pgc_nr"] = pgc->prev_pgc_nr;
+    jpgc["goup_pgc_nr"] = pgc->goup_pgc_nr;
+
     {
       json program_map = json::array();
 
@@ -37,6 +41,23 @@ json process_pgcit(pgcit_t *pgcit) {
         program_map.push_back(pgc->program_map[i]);
       }
       jpgc["program_map"] = program_map;
+    }
+
+    {
+      json audio_control = json::array();
+
+      for (auto i = 0; i < 8; i++) {
+        auto ac = pgc->audio_control[i];
+        uint8_t rb = (ac & 0xFF00) >> 8;
+        bool avalible = (rb & 0x80) != 0;
+        uint8_t number = rb & 7;
+
+        json jj;
+        jj["available"] = avalible;
+        jj["number"] = number;
+        audio_control.push_back(jj);
+      }
+      jpgc["audio_control"] = audio_control;
     }
 
     {
@@ -77,7 +98,8 @@ json process_pgcit(pgcit_t *pgcit) {
 }
 
 extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
-                           const char *dvdpath, uint32_t current_vts) {
+                           const char *dvdpath, uint32_t current_vts,
+                           uint32_t current_domain) {
   if (!dvd) {
     printf("DVD IS NULL\n");
   }
@@ -91,6 +113,7 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
   if (dvdpath) {
     a["dvdpath"] = std::string(dvdpath);
     a["current_vts"] = current_vts;
+    a["current_domain"] = current_domain;
   }
 
   for (auto i = 0; i < nr + 1; i++) {
@@ -128,6 +151,8 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
         jj.push_back(ll);
       }
       vts["tt_srpt"] = jj;
+    } else {
+      vts["tt_srpt"] = json::array();
     }
 
     if (ifo2->vts_pgcit) {
@@ -159,17 +184,40 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
 
     if (ifo2->vtsi_mat) {
       auto vtsi_mat = ifo2->vtsi_mat;
-      auto va = vtsi_mat->vts_video_attr;
       json jj;
 
-      json vts_video_attr;
+      {
+        json vts_audio_attr;
+        for (int i = 0; i < vtsi_mat->nr_of_vts_audio_streams; i++) {
+          auto aud = vtsi_mat->vts_audio_attr[i];
+          json lj;
+          lj["audio_format"] = (int)aud.audio_format;
+          if (aud.lang_type) {
+            char bb[3] = {'x', 'y', '\0'};
+            bb[0] = (aud.lang_code & 0xFF00) >> 8;
+            bb[1] = aud.lang_code & 0xFF;
 
-      uint16_t asd = vtsi_mat->vts_video_attr.mpeg_version;
-      vts_video_attr["mpeg_version"] = (int64_t)va.mpeg_version;
-      vts_video_attr["video_format"] = (int64_t)va.video_format;
-      vts_video_attr["picture_size"] = (int64_t)va.picture_size;
+            lj["language"] = bb;
+          } else {
+            lj["language"] = "xx";
+          }
 
-      jj["vts_video_attr"] = vts_video_attr;
+          vts_audio_attr.push_back(lj);
+        }
+        jj["vts_audio_attr"] = vts_audio_attr;
+      }
+      {
+        auto va = vtsi_mat->vts_video_attr;
+
+        json vts_video_attr;
+
+        uint16_t asd = vtsi_mat->vts_video_attr.mpeg_version;
+        vts_video_attr["mpeg_version"] = (int64_t)va.mpeg_version;
+        vts_video_attr["video_format"] = (int64_t)va.video_format;
+        vts_video_attr["picture_size"] = (int64_t)va.picture_size;
+
+        jj["vts_video_attr"] = vts_video_attr;
+      }
       vts["vtsi_mat"] = jj;
     }
 
@@ -203,6 +251,8 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
       }
 
       vts["vts_c_adt"] = jj;
+    } else {
+      vts["vts_c_adt"] = json::array();
     }
 
     ifos.push_back(vts);

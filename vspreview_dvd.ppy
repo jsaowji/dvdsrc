@@ -1,3 +1,6 @@
+#TODO: MOSTLY BROKEN DUE API CHANGE REWRITE
+#TODO: MOSTLY BROKEN DUE API CHANGE REWRITE
+#TODO: MOSTLY BROKEN DUE API CHANGE REWRITE
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -39,7 +42,7 @@ class VobId:
 __all__ = [
     'PluginMain',
     'PluginJSON',
-    'PluginVOBID',
+    'PluginMISCINFO',
 ]
 
 class PluginMain(AbstractPlugin, QWidget):
@@ -132,7 +135,7 @@ class PluginMain(AbstractPlugin, QWidget):
                 self.main, 'Save as', "/tmp", "vob (*.vob)"
             )
             if not (file_type is None):
-                core.dvdsrc.VobToFile(path,vts,domain,secstors,save_path_str)
+                core.dvdsrc.VobToFile(path,vts,domain,secstors,save_path_str,0)
 
     def get_notches(self) -> Notches:
         #hack because our on_current_output_changed is called after get_notches
@@ -285,7 +288,7 @@ class PluginMain(AbstractPlugin, QWidget):
                     else:
                         c,d = rang.original_ranges[i]
                         cells += f"pgcn {a}  pgn {b}  [{c} {d}]\n"
-                    
+
                     if only_one_pgc and i != 0:
                         if current_title[i-1]["pgcn"] != current_title[i]["pgcn"]:
                             only_one_pgc = False
@@ -308,8 +311,6 @@ class PluginMain(AbstractPlugin, QWidget):
                         print("b")
 
 
-
-                
                 chapter_text1 = ""
                 for c in rang.chapters:
                     chapter_text1 += f"{c}\n"
@@ -621,8 +622,8 @@ class PluginJSON(AbstractPlugin, QWidget):
             self.json_view.root_item.takeChildren()
             self.json_view.recurse_jdata(self.json, self.json_view.root_item)
 
-class PluginVOBID(AbstractPlugin, QWidget):
-    _config = PluginConfig('com.jsaowji.dvdvobid', 'dvdvobid')
+class PluginMISCINFO(AbstractPlugin, QWidget):
+    _config = PluginConfig('com.jsaowji.dvdmiscinfo', 'dvdmiscinfo')
 
     def setup_ui(self) -> None:
         self.vobids = None
@@ -650,6 +651,23 @@ class PluginVOBID(AbstractPlugin, QWidget):
                 label_text += f"VOBID {k}: "
                 ranges = vstools.normalize_list_to_ranges(v)
                 label_text += f"{ranges}\n"
+
+            compa = DvdCompanion(self.main.current_output.source.clip)
+
+            tff = 0
+            bff = 0
+            rff = 0
+            for i in range(len(compa.tff)):
+                if compa.rff[i]:
+                    rff += 1
+                if compa.tff[i]:
+                    tff += 1
+                else:
+                    bff += 1
+            label_text += "\n\n"
+            label_text += "tffcnt: {}\n".format(tff)
+            label_text += "bffcnt: {}\n".format(bff)
+            label_text += "rffcnt: {}\n".format(rff)
 
             self.label.setPlainText(label_text)
         else:

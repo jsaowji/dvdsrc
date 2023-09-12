@@ -21,6 +21,8 @@ pub const PsIndex = struct {
     indexs: std.ArrayList(IndexEntry) = undefined,
     current_size: u64 = 0,
 
+    total_size: u64 = 0,
+
     pub fn deinit(self: *Self) void {
         self.indexs.deinit();
     }
@@ -54,6 +56,7 @@ pub const PsIndex = struct {
             bytes_sz += entr.size;
             i += 1;
         }
+        ini.total_size = bytes_sz;
         ini.current_size = cnt;
         return ini;
     }

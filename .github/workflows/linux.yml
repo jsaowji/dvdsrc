@@ -40,5 +40,5 @@ jobs:
         name: windowslibdvdsrcso
         path: |
           pydvdcompanion.py
-          vspreview_dvd.ppy
+          pydvdsrc.py
           zig-out/lib/*

@@ -5,22 +5,20 @@ const mm = std.heap.c_allocator;
 
 pub const Mode = enum {
     m2v,
-    full,
+    ac3,
+    neofull,
 };
 
-pub const Domain = enum {
-    titlevobs,
-    menuvob,
-};
-
-pub const ModeFull = struct {
+pub const NeoModeFull = struct {
     vts: u8,
-    domain: Domain,
+    domain: i64,
+    sectors_hash: u64,
 };
 
 pub const ModeInfo = union(Mode) {
     m2v,
-    full: ModeFull,
+    ac3,
+    neofull: NeoModeFull,
 };
 
 pub const IndexInfo = struct {
@@ -42,22 +40,30 @@ pub const IndexInfo = struct {
     }
 };
 
+pub const IdxFolder = struct { existed: bool, dir: std.fs.Dir };
+
 pub const IndexManager = struct {
-    pub fn getIndexFolder(ii: IndexInfo) !struct { existed: bool, dir: std.fs.Dir } {
+    pub fn getIndexFolder(ii: IndexInfo) !IdxFolder {
         var basename = std.fs.path.basename(ii.path);
         var hash = std.hash.Crc32.init();
 
-        std.hash.autoHashStrat(&hash, "version99", .Deep);
+        std.hash.autoHashStrat(&hash, "version2", .Deep);
         std.hash.autoHashStrat(&hash, ii.path, .Deep);
         const finalhash = hash.final();
 
         var pp: []u8 = undefined;
         switch (ii.mode) {
-            .full => |a| {
-                pp = try std.fmt.allocPrint(mm, "{s}_{}_{}_{}", .{ basename, a.vts, a.domain, finalhash });
+            //.full => |a| {
+            //    pp = try std.fmt.allocPrint(mm, "{s}_{}_{}_{}", .{ basename, a.vts, a.domain, finalhash });
+            //},
+            .neofull => |a| {
+                pp = try std.fmt.allocPrint(mm, "{s}_{}_{}_{}_{}", .{ basename, a.vts, a.domain, a.sectors_hash, finalhash });
             },
             .m2v => {
-                pp = try std.fmt.allocPrint(mm, "{s}_{}", .{ basename, finalhash });
+                pp = try std.fmt.allocPrint(mm, "{s}_m2v_{}", .{ basename, finalhash });
+            },
+            .ac3 => {
+                pp = try std.fmt.allocPrint(mm, "{s}_ac3_{}", .{ basename, finalhash });
             },
         }
         defer mm.free(pp);

@@ -4,7 +4,6 @@ const vs = @import("bindings/vapoursynth.zig");
 const mpeg2 = @import("./bindings/mpeg2.zig");
 
 const dvd_reader = @import("./dvd_reader.zig");
-const m2v_reader = @import("./m2v_reader.zig");
 const ps_index = @import("./ps_index.zig");
 const m2v_index = @import("./m2v_index.zig");
 const utils = @import("./utils.zig");
@@ -366,6 +365,9 @@ pub fn RandomAccessDecoder(comptime M2vReaderType: type) type {
                     self.m2v.seekTo(wanted_gop.sequence_info_start) catch unreachable;
 
                     buf_len = self.m2v.reader().readAtLeast(buf, buf.len) catch unreachable;
+                    @memcpy(buf[buf_len .. buf_len + 4], &m2v_index.M2V_SEQ_END);
+                    buf_len += 4;
+
                     std.debug.assert(buf_len < buf.len);
                 }
 

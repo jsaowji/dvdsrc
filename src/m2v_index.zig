@@ -1,6 +1,8 @@
 const std = @import("std");
 const mpeg2 = @import("bindings/mpeg2.zig");
 
+pub const M2V_SEQ_END = [_]u8{ 0x00, 0x00, 0x01, 0xB7 };
+
 pub fn writeoutSequence(self: *const mpeg2.mpeg2_sequence_t, ww: anytype) !void {
     try ww.writeIntLittle(c_uint, self.width);
     try ww.writeIntLittle(c_uint, self.height);
@@ -187,8 +189,8 @@ pub const GopLookup = struct {
     }
 
     pub fn init(mm: std.mem.Allocator, gop_rd: anytype) !GopLookup {
-        var arl = std.ArrayList(OutGopInfo).init(mm);
-        var framegoplookup = std.ArrayList(GopLookupEntry).init(mm);
+        var arl = try std.ArrayList(OutGopInfo).initCapacity(mm, 8192);
+        var framegoplookup = try std.ArrayList(GopLookupEntry).initCapacity(mm, 3 * 60 * 60 * 24);
         var total_frame_cnt: c_int = 0;
 
         var gop_cnt: u32 = 0;

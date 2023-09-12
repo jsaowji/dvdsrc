@@ -3,11 +3,57 @@ const utils = @import("utils.zig");
 const dsi = @import("dsi.zig");
 const pci = @import("pci.zig");
 
-pub fn psM2vExtracter(comptime allocator: anytype) !PsM2vExtracter(@TypeOf(allocator)) {
-    return PsM2vExtracter(@TypeOf(allocator)).init(allocator);
+pub const DummyWriteout = struct {
+    const Self = @This();
+
+    pub fn audioIndex(self: *const Self, idx: usize) bool {
+        _ = self;
+        _ = idx;
+        return false;
+    }
+
+    pub fn writeAll(self: *const Self, buf: []u8) !void {
+        _ = buf;
+        _ = self;
+    }
+};
+
+fn AudioFilterId(comptime WriterType: type) type {
+    return struct {
+        const Self = @This();
+
+        inner: WriterType,
+        id: usize,
+
+        pub fn init(inner: WriterType, id: usize) Self {
+            return .{
+                .inner = inner,
+                .id = id,
+            };
+        }
+
+        pub fn audioIndex(self: *const Self, idx: usize) bool {
+            if (self.id == idx) {
+                return true;
+            }
+            return false;
+        }
+
+        pub fn writeAll(self: *const Self, buf: []u8) !void {
+            try self.inner.writeAll(buf);
+        }
+    };
 }
 
-pub fn PsM2vExtracter(comptime AllocatorType: anytype) type {
+pub fn audioIdFilter(asd: anytype, id: usize) AudioFilterId(@TypeOf(asd)) {
+    return AudioFilterId(@TypeOf(asd)).init(asd, id);
+}
+
+pub fn psExtracter(comptime allocator: anytype) !PsExtracter(@TypeOf(allocator)) {
+    return PsExtracter(@TypeOf(allocator)).init(allocator);
+}
+
+pub fn PsExtracter(comptime AllocatorType: anytype) type {
     return struct {
         const Self = @This();
         buf: []u8,
@@ -20,7 +66,7 @@ pub fn PsM2vExtracter(comptime AllocatorType: anytype) type {
 
         //inverse
         current_angles: u8 = 0,
-        current_vobid: u16 = 0,
+        current_vobidcellid: u32 = 0,
 
         pub fn init(allocat: AllocatorType) !Self {
             return Self{
@@ -33,7 +79,7 @@ pub fn PsM2vExtracter(comptime AllocatorType: anytype) type {
             self.allocator.free(self.buf);
         }
 
-        pub fn demuxOne(self: *Self, read_in: anytype, write_out: anytype) !void {
+        pub fn demuxOne(self: *Self, read_in: anytype, m2v_write_out: anytype, ac3_write_out: anytype, lpcm_write_out: anytype) !void {
             const st = try utils.checkStartCode(read_in);
 
             switch (st) {
@@ -61,13 +107,14 @@ pub fn PsM2vExtracter(comptime AllocatorType: anytype) type {
                         self.dsi = try dsi.parseDSI(self.buf[1 .. data_read - 1]);
                         std.debug.assert(self.got_dsi == false);
                         self.got_dsi = true;
+                        //   std.debug.print("debug VOBID CELID {} {}\n", .{ self.dsi.vobu_vob_idn, self.dsi.vobu_c_idn });
                     } else {
                         std.debug.print("GOT AD {}\n", .{self.buf[0]});
                         std.debug.assert(false);
                     }
 
                     if (self.got_pack and self.got_dsi and self.got_pci) {
-                        self.current_vobid = self.dsi.vobu_vob_idn;
+                        self.current_vobidcellid = (@as(u32, @intCast(self.dsi.vobu_vob_idn)) << 8) + @as(u32, @intCast(self.dsi.vobu_c_idn));
 
                         var a: u8 = 0;
                         for (0..8) |i| {
@@ -105,8 +152,37 @@ pub fn PsM2vExtracter(comptime AllocatorType: anytype) type {
                         self.got_pci = false;
                     }
                 },
+                //another private stream
+                0xBD => {
+                    var len = try read_in.readIntBig(u16);
+
+                    if (len > self.buf.len) {
+                        self.allocator.free(self.buf);
+                        self.buf = try self.allocator.alloc(u8, len);
+                    }
+                    const data_read = try read_in.readAtLeast(self.buf[0..len], len);
+                    std.debug.assert(data_read == len);
+                    const hdr_data_len = self.buf[2];
+                    const inner_data = self.buf[3 + hdr_data_len .. len];
+
+                    // std.debug.print("framecnt {} \n", .{inner_data[1]});
+
+                    const inner_id = inner_data[0];
+                    if (inner_id >= 0x80 and inner_id <= 0x87) {
+                        const idx = inner_id - 0x80;
+                        if (ac3_write_out.audioIndex(idx)) {
+                            try ac3_write_out.writeAll(inner_data[1 + 3 ..]);
+                        }
+                    }
+                    if (inner_id >= 0xA0 and inner_id <= 0xA7) {
+                        const idx = inner_id - 0xA0;
+                        if (lpcm_write_out.audioIndex(idx)) {
+                            try lpcm_write_out.writeAll(inner_data[1 + 3 ..]);
+                        }
+                    }
+                },
                 //other possible pes streams that aren't video
-                0xBD, 0xBB, 0xBE => {
+                0xBB, 0xBE => {
                     const len = try read_in.readIntBig(u16);
                     _ = try read_in.skipBytes(len, .{});
                 },
@@ -123,7 +199,7 @@ pub fn PsM2vExtracter(comptime AllocatorType: anytype) type {
                     const hdr_data_len = self.buf[2];
                     const mpeg2_data = self.buf[3 + hdr_data_len .. len];
 
-                    _ = try write_out.writeAll(mpeg2_data);
+                    _ = try m2v_write_out.writeAll(mpeg2_data);
                 },
                 else => {
                     unreachable;
