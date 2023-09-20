@@ -2,15 +2,16 @@
 namespace and api not final
 WIP
 
-# supoort 
-video: 
-mpeg1: ?
-mpeg2: Y (NTCS and PAL should work)
+# support 
 
-audio: (not much tested, especally non stereo)
-ac3: Y
-lpcm: Y
-other: not yet
+## video:
+- mpeg1: ?
+- mpeg2: Y (NTCS and PAL should work)
+
+## audio: (not much tested, especally non stereo)
+- ac3: Y
+- lpcm: Y
+- other: not yet
 
 
 ## Usage examples

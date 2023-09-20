@@ -229,6 +229,9 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                     },
                     mpeg2.STATE_GOP => {
                         var gop = info.*.gop.*;
+
+                        debugPrint("GOP {}h {}m {}s {}p\n", .{ gop.hours, gop.minutes, gop.seconds, gop.pictures });
+
                         std.debug.assert(current_gop.frame_cnt == self.slice_cnt);
 
                         if (self.total_framecnt != 0) {

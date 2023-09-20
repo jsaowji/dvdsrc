@@ -157,9 +157,9 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
 
     if (ifo2->vts_pgcit) {
       auto jpgc = process_pgcit(ifo2->vts_pgcit);
-      vts["pgcs"] = jpgc;
+      vts["vts_pgcit"] = jpgc;
     } else {
-      vts["pgcs"] = json::array();
+      vts["vts_pgcit"] = json::array();
     }
 
     if (ifo2->vts_ptt_srpt) {

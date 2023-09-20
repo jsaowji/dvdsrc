@@ -298,7 +298,7 @@ class PluginMain(AbstractPlugin, QWidget):
                 if only_one_pgc:
                     pgcn = current_title[0]["pgcn"]
                     
-                    pgm = current_vts["pgcs"][pgcn-1]["program_map"]
+                    pgm = current_vts["vts_pgcit"][pgcn-1]["program_map"]
 
                     if len(pgm) == len(pgns):
                         for ii,a in enumerate(pgns):
@@ -442,7 +442,7 @@ Angles: {angl_cnt}
             #Kind of hacky dunno we only want to check if the vob files exists we want to open
             cell_cnt = 0
             for a in ifo["pgci_ut"]:
-                for a in a["pgcs"]:
+                for a in a["vts_pgcit"]:
                     cell_cnt += a["nr_of_cells"]
             if cell_cnt >= 1:
                 vobs_item.addChild(menuvobs)

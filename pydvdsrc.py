@@ -242,7 +242,7 @@ def apply_rff_array(rff: List[int],ovobid: List[int]) -> List[int]:
         f1 = vobid_double_rate[i*2+0]
         f2 = vobid_double_rate[i*2+1]
         if f1 != f2:
-            print("warning rff goes across vobids")
+            print("warning rff goes across cells {} {}".format(f1, f2))
         vobid += [ f1 ]
 
     return vobid
@@ -253,7 +253,7 @@ def apply_rff_video(node: vs.VideoNode, rff: List[int], tff: List[int]):
     assert len(rff) == len(tff)
 
     fields = []
-    tfffs = core.std.SeparateFields(core.std.RemoveFrameProps(node,props=["_FieldBased","_Field"]),tff=True)
+    tfffs = core.std.SeparateFields(core.std.RemoveFrameProps(node, props=["_FieldBased","_Field"]),tff=True)
 
     for i in range(len(rff)):
         current_tff = tff[i]
@@ -271,10 +271,15 @@ def apply_rff_video(node: vs.VideoNode, rff: List[int], tff: List[int]):
             fields += [ fields[-2] ]
 
     assert (len(fields) % 2) == 0
+
     for a in range(len(fields) // 2):
         tf = fields[a*2] 
         bf = fields[a*2+1]
-        assert tf["tf"] != bf["tf"]
+    
+        #should this assert?
+        #assert tf["tf"] != bf["tf"]
+        if tf["tf"] == bf["tf"]:
+            print("invalid field transition @{}".format(a))
 
     fields = [ x["n"] for x in fields ]
 

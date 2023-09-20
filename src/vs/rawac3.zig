@@ -10,6 +10,7 @@ const dvdread = @import("../manual_dvdread.zig");
 
 const rad = @import("../random_access_decoder.zig");
 const index_manager = @import("../index_manager.zig");
+const secto_reader = @import("../secto_reader.zig");
 const m2v_index = @import("../m2v_index.zig");
 const indexer = @import("../indexer.zig");
 
@@ -22,7 +23,7 @@ pub const BLOCKSIZE: u64 = 2048;
 pub const RawAc3Filter = struct {
     const RawAc3Data = struct {
         video_info: vs.VSVideoInfo,
-        data_reader: ps_reader.psReader(dvd_reader.DvdReader),
+        data_reader: ps_reader.psReader(secto_reader.SectoReader),
         maxsize: u64,
     };
 
@@ -58,7 +59,11 @@ pub const RawAc3Filter = struct {
     pub export fn rawAc3filterCreate(in: ?*const vs.VSMap, out: ?*vs.VSMap, userData: ?*anyopaque, core: ?*vs.VSCore, vsapi: [*c]const vs.VSAPI) callconv(.C) void {
         _ = userData;
         var ret = fullfilter.make_sure_indexing(in, out, vsapi) catch return;
-        var psidx = fullfilter.readinPsIndex(indexer.PS_INDEX_AC3[0], ret.idxf.dir) catch unreachable;
+
+        const audoindex = vsapi.*.mapGetInt.?(in, "audioidx", 0, 0);
+        const audoindex_usize = @as(usize, @intCast(audoindex));
+
+        var psidx = fullfilter.readinPsIndex(indexer.PS_INDEX_AC3[audoindex_usize], ret.idxf.dir) catch unreachable;
 
         var data = cmn.mm.create(RawAc3Data) catch unreachable;
         data.*.maxsize = psidx.total_size;
@@ -80,9 +85,11 @@ pub const RawAc3Filter = struct {
             domain = dvdread.DVD_READ_TITLE_VOBS;
         }
         var dvd_r = dvdread.DVDOpen2(null, &dvd_reader.dummy_logger, ret.dvd);
-        var file = dvdread.DVDOpenFile(@as(*dvdread.dvd_reader_t, @ptrCast(dvd_r)), @as(c_int, @intCast(ret.vts)), domain);
+        var sectoReader = fullfilter.openSectoReader(in, vsapi, dvd_r.?, ret.vts, ret.domain);
 
-        data.*.data_reader = ps_reader.psReader(dvd_reader.DvdReader).init(psidx, dvd_reader.DvdReader.init(file.?), ps_reader.OutInfo{ .AC3 = 0 }) catch unreachable;
+        //        var file = dvdread.DVDOpenFile(@as(*dvdread.dvd_reader_t, @ptrCast(dvd_r)), @as(c_int, @intCast(ret.vts)), domain);
+
+        data.*.data_reader = ps_reader.psReader(secto_reader.SectoReader).init(psidx, sectoReader.reader, ps_reader.OutInfo{ .AC3 = audoindex_usize }) catch unreachable;
 
         vsapi.*.createVideoFilter.?(out, "RawAc3", &data.video_info, rawAc3FilterGetFrame, rawAc3FilterFree, vs.fmUnordered, null, 0, data, core);
     }

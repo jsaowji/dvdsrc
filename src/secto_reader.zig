@@ -44,7 +44,6 @@ pub const SectoReader = struct {
         //   std.debug.print("read {}\n", .{dest.len});
         if (self.buffer_left == 0) {
             if (self.sector_i == self.sector_cnt) return Error.AllRead;
-            //const sector = self.vsapi.*.mapGetInt.?(self.in, "sectors", @as(c_int, @intCast(self.sector_i)), 0);
             const sector = self.sectors[self.sector_i];
             _ = dvdread.DVDReadBlocks(self.dvdfile, @as(c_int, @intCast(sector)), 1, &self.buffer);
             self.buffer_left = 2048;

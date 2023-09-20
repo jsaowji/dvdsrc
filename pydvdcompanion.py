@@ -64,7 +64,7 @@ class PgcChapterMode(Enum):
 #t = title domain
 def st_pgc_cellsplit(dvd: DVD, vts: int, pgc_nr: int, cell_nrs: List[int], chapter_mode: PgcChapterMode = PgcChapterMode.CELL) -> Extract:
     vts = dvd.vts[vts]
-    pgcjson = vts.json["pgcs"][pgc_nr-1]
+    pgcjson = vts.json["vts_pgcit"][pgc_nr-1]
     
     is_all_cells_inorder = True
     if len(cell_nrs) != pgcjson["nr_of_cells"]:
@@ -118,7 +118,7 @@ def st_pgc_vobids(dvd: DVD,vts: int,pgc_nr: int,vobids: List[int] | int, chapter
     if isinstance(vobids,int):
         vobids = [vobids]
     vts1 = dvd.vts[vts]
-    pgcjson = vts1.json["pgcs"][pgc_nr-1]
+    pgcjson = vts1.json["vts_pgcit"][pgc_nr-1]
 
     #assert vobid only happens once
     #assert all continous
@@ -130,7 +130,7 @@ def st_pgc_vobids(dvd: DVD,vts: int,pgc_nr: int,vobids: List[int] | int, chapter
     return st_pgc_cellsplit(dvd,vts,pgc_nr,cells,chapter_mode)
 
 def st_pgc_full(dvd: DVD,vts: int,pgc_nr: int,chapter_mode: PgcChapterMode = PgcChapterMode.CELL) -> Extract:
-    return st_pgc_cellsplit(dvd,vts,pgc_nr,range(1,dvd.vts[vts].json["pgcs"][pgc_nr-1]["nr_of_cells"]+1))
+    return st_pgc_cellsplit(dvd,vts,pgc_nr,range(1,dvd.vts[vts].json["vts_pgcit"][pgc_nr-1]["nr_of_cells"]+1))
 #</>
 
 def cut_audio_node_on_ranges(a,b: List[Tuple[int,int]]):
@@ -178,7 +178,7 @@ class Ctx:
     def load_dvdstxt_folder(self,file: str,dvdpath: str = "dvds.txt"):
         self.dvds |= load_dvds_from_txt(os.path.join(os.path.dirname(os.path.realpath(file)), dvdpath))
 
-    def labmdify_eps(self, eps: dict,filter_callback = None) -> dict:
+    def lambdify_eps(self, eps: dict,filter_callback = None) -> dict:
         leps = dict()
         for k in eps.keys():
             if callable(eps[k]):
@@ -204,7 +204,7 @@ def mpv_play_pgc_cell(dvdpath: str,vts: int,pgc_nr: int,cell_nr: List[int]):
     vts = dvd.vts[vts]
     cl = []
     for a in cell_nr:
-        cp = vts.json["pgcs"][pgc_nr-1]["cell_position"][a-1]
+        cp = vts.json["vts_pgcit"][pgc_nr-1]["cell_position"][a-1]
         cl += vts.vts_adt.get_sector_list_vobidcellid(cp["vob_id_nr"],cp["cell_nr"])
     asd = vts.title.cutout(cl)
     mpv_send_to_raw(asd)
