@@ -85,7 +85,6 @@ def st_pgc_cellsplit(dvd: DVD, vts: int, pgc_nr: int, cell_nrs: List[int], chapt
 
     oa = pgc_open_audios(sl,vts,pgc_get_availible_audio_idxs(pgcjson))
 
-
     vobidfram = create_vobid_frame_dict(vobid)
     framesget = []
     chpts = []

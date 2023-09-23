@@ -519,6 +519,7 @@ fn putprops(f: ?*vs.VSFrame, vsapi: [*c]const vs.VSAPI, picture: ?*const mpeg2.m
     //SAR
     if (seq.pixel_width > 0 and seq.pixel_height > 0) {
         var default_sar = true;
+
         if (guess_ar) {
             var pw: c_uint = 0;
             var ph: c_uint = 0;

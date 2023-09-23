@@ -35,7 +35,6 @@ class ADT:
         for c in sectors:
             ret += list(range(c[0],c[1] + 1))
         return ret
-        
 
 
 class DVD:
@@ -197,7 +196,7 @@ def get_sectors_for_full_pgc_simple(current_vts: dict, pgcjson: dict) -> List[in
 
     sectors = []
     for pos in pgcjson["cell_position"]:
-        sector_ranges = get_sectorranges_for_vobcellpair(current_vts, pos["cell_nr"], pos["vob_id_nr"])
+        sector_ranges = get_sectorranges_for_vobcellpair_2(current_vts, pos["cell_nr"], pos["vob_id_nr"])
         assert len(sector_ranges) == 1
 
         sector_ranges = sector_ranges[0]
@@ -206,7 +205,7 @@ def get_sectors_for_full_pgc_simple(current_vts: dict, pgcjson: dict) -> List[in
 
     return sectors
 
-def get_sectorranges_for_vobcellpair(current_vts: dict, cell_id: int, vob_id: int):
+def get_sectorranges_for_vobcellpair_2(current_vts: dict, cell_id: int, vob_id: int):
     ranges = []
 
     #todo binary search for vobid
@@ -225,56 +224,84 @@ def assert_no_interleave(cell_playbacks):
             print("Interleaved stuff is not supported in this function")
             assert False
 
-#RFF FLAGS
-def apply_rff_array(rff: List[int],ovobid: List[int]) -> List[int]:
-    vobid_double_rate = []
+def cut_node(node: vs.VideoNode,frames: list[int]) -> vs.VideoNode:
+    ranges = normalize_list_to_ranges(frames)
+    return cut_node_on_ranges(node,ranges)
+
+
+
+#WARNING used in pydvdsrcs
+
+def get_sectors_from_vobids(target_vts: dict, vobidcellids_to_take: List[Tuple[int, int]]) -> List[int]:
+    sectors = []
+    for a in vobidcellids_to_take:
+        for srange in get_sectorranges_for_vobcellpair(target_vts, a):
+            sectors += list(range(srange[0], srange[1] + 1))
+    return sectors
+
+def get_sectorranges_for_vobcellpair(current_vts: dict, pair_id: Tuple[int, int]) -> List[Tuple[int,int]]:
+    ranges = []
+    for e in current_vts["vts_c_adt"]:
+        if e["cell_id"] == pair_id[1] and e["vob_id"] == pair_id[0]:
+            ranges += [(e["start_sector"], e["last_sector"])]
+    return ranges
+
+
+
+
+##THIS IS IN VSsource
+from vstools import vs, core, SPath, normalize_list_to_ranges, FrameRange
+from typing import List, Any
+from functools import partial
+
+def apply_rff_array(rff: List[int], old_array: List[any]) -> List[any]:
+    array_double_rate = []
         
     for a in range(len(rff)):
         if rff[a] == 1:
-            vobid_double_rate += [ ovobid[a], ovobid[a], ovobid[a] ]
+            array_double_rate += [ old_array[a], old_array[a], old_array[a] ]
         else:
-            vobid_double_rate += [ ovobid[a], ovobid[a] ]
+            array_double_rate += [ old_array[a], old_array[a] ]
     
-    assert (len(vobid_double_rate) % 2) == 0
+    assert (len(array_double_rate) % 2) == 0
     
-    vobid = []
-    for i in range(len(vobid_double_rate) // 2):
-        f1 = vobid_double_rate[i*2+0]
-        f2 = vobid_double_rate[i*2+1]
+    array_return = []
+    for i in range(len(array_double_rate) // 2):
+        f1 = array_double_rate[i * 2 + 0]
+        f2 = array_double_rate[i * 2 + 1]
         if f1 != f2:
-            print("warning rff goes across cells {} {}".format(f1, f2))
-        vobid += [ f1 ]
+            print("Warning ambigious pattern due to rff {} {}".format(f1, f2))
+        array_return += [ f1 ]
 
-    return vobid
+    return array_return
 
-#this assumes progressive_sequence 0
-def apply_rff_video(node: vs.VideoNode, rff: List[int], tff: List[int]):
+def apply_rff_video(node: vs.VideoNode, rff: List[int], tff: List[int]) -> vs.VideoNode:
     assert len(node) == len(rff)
     assert len(rff) == len(tff)
 
     fields = []
-    tfffs = core.std.SeparateFields(core.std.RemoveFrameProps(node, props=["_FieldBased","_Field"]),tff=True)
+    tfffs = core.std.SeparateFields(core.std.RemoveFrameProps(node, props=["_FieldBased","_Field"]), tff=True)
 
     for i in range(len(rff)):
         current_tff = tff[i]
         current_bff = int(not current_tff)
 
         if current_tff == 1:
-            first_field  = 2*i
-            second_field = 2*i+1
+            first_field  = 2 * i
+            second_field = 2 * i + 1
         else:
-            first_field  = 2*i+1
-            second_field = 2*i
+            first_field  = 2 * i + 1
+            second_field = 2 * i
 
-        fields += [ {"n":first_field,"tf": current_tff}, {"n":second_field,"tf": current_bff} ]
+        fields += [ {"n":first_field, "tf": current_tff}, {"n":second_field, "tf": current_bff} ]
         if rff[i] == 1:
             fields += [ fields[-2] ]
 
     assert (len(fields) % 2) == 0
 
     for a in range(len(fields) // 2):
-        tf = fields[a*2] 
-        bf = fields[a*2+1]
+        tf = fields[a * 2] 
+        bf = fields[a * 2 + 1]
     
         #should this assert?
         #assert tf["tf"] != bf["tf"]
@@ -292,34 +319,7 @@ def apply_rff_video(node: vs.VideoNode, rff: List[int], tff: List[int]):
 
     return woven
 
-
-
-
-
-
-
-# FRAME CUTTING
-def cut_node(node: vs.VideoNode,frames: list[int]) -> vs.VideoNode:
-    ranges = vstools.normalize_list_to_ranges(frames)
-    return cut_node_on_ranges(node,ranges)
-
-def cut_node_on_ranges(node: vs.VideoNode, ranges) -> vs.VideoNode:
-    remap_frames = tuple[int, ...]([
-        x for y in [
-            range(rrange[0], rrange[1] + 1) for rrange in ranges
-        ] for x in y
-    ])
-    return clip_remap_frames(node,remap_frames)
-
-def clip_remap_frames(node: vs.VideoNode, remap_frames) -> vs.VideoNode: #remap_frames: List[int]
-    blank = node.std.BlankClip(length=len(remap_frames))
-
-    def ele(n,leldvd,lelremap_frames):
-        return leldvd[lelremap_frames[n]]
-
-    return blank.std.FrameEval(functools.partial(ele,leldvd=node,lelremap_frames=remap_frames))
-
-def cut_array_on_ranges(array: List[int], ranges) -> vs.VideoNode:
+def cut_array_on_ranges(array: List[Any], ranges: List[FrameRange]) -> List[Any]:
     remap_frames = tuple[int, ...]([
         x for y in [
             range(rrange[0], rrange[1] + 1) for rrange in ranges
@@ -330,3 +330,18 @@ def cut_array_on_ranges(array: List[int], ranges) -> vs.VideoNode:
         newarray += [ array[i] ]
     return newarray 
 
+def cut_node_on_ranges(node: vs.VideoNode, ranges: List[FrameRange]) -> vs.VideoNode:
+    remap_frames = tuple[int, ...]([
+        x for y in [
+            range(rrange[0], rrange[1] + 1) for rrange in ranges
+        ] for x in y
+    ])
+    return clip_remap_frames(node,remap_frames)
+
+def clip_remap_frames(node: vs.VideoNode, remap_frames) -> vs.VideoNode: #remap_frames: List[int]
+    blank = node.std.BlankClip(length=len(remap_frames))
+
+    def noname(n, target_node, targetremap_frames):
+        return target_node[targetremap_frames[n]]
+
+    return blank.std.FrameEval(partial(noname,target_node=node, targetremap_frames=remap_frames))

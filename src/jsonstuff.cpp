@@ -121,7 +121,7 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
     json vts;
 
     // VMG AND VTS, Menu PGCI Unit Table
-    if (ifo2->pgci_ut) {
+    if (ifo2->pgci_ut && false) {
       json lus = json::array();
       for (auto j = 0; j < ifo2->pgci_ut->nr_of_lus; j++) {
         auto pgci = ifo2->pgci_ut->lu[j];
@@ -187,7 +187,7 @@ extern "C" char *getstring(char *bigbuffer, dvd_reader_t *dvd,
       json jj;
 
       {
-        json vts_audio_attr;
+        json vts_audio_attr = json::array();
         for (int i = 0; i < vtsi_mat->nr_of_vts_audio_streams; i++) {
           auto aud = vtsi_mat->vts_audio_attr[i];
           json lj;
