@@ -129,6 +129,7 @@ pub const OutGopInfo = struct {
     //where you need to seek to to start decoding this gop (in the m2v stream)
     sequence_info_start: u64 = 0,
     closed: bool = false,
+    prog_sequence: bool = false,
     frame_cnt: u8 = 0,
     frames: [30]Frame = undefined, //in decode order
 
@@ -139,7 +140,10 @@ pub const OutGopInfo = struct {
 
         var clsd: u8 = 0;
         if (self.closed) {
-            clsd = 1;
+            clsd += 1;
+        }
+        if (self.prog_sequence) {
+            clsd += 2;
         }
         try ww.writeIntLittle(u8, clsd);
         try ww.writeIntLittle(u8, self.frame_cnt);
@@ -153,7 +157,9 @@ pub const OutGopInfo = struct {
         var self: Self = undefined;
 
         self.sequence_info_start = try rr.readIntLittle(u64);
-        self.closed = try rr.readIntLittle(u8) == 1;
+        const clsd = try rr.readIntLittle(u8);
+        self.closed = (clsd & 1) != 0;
+        self.prog_sequence = (clsd & 2) != 0;
         self.frame_cnt = try rr.readIntLittle(u8);
 
         for (0..self.frame_cnt) |i| {

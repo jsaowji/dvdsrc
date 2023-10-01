@@ -277,6 +277,8 @@ pub const FullFilter = struct {
         var angle_frame = vsapi.*.newVideoFrame.?(&format, f1sz, 1, null, core);
         var rff_frame = vsapi.*.newVideoFrame.?(&format, 1920 * 1088 * 3, 1, null, core);
         var tff_frame = vsapi.*.newVideoFrame.?(&format, 1920 * 1088 * 3, 1, null, core);
+        var progseq_frame = vsapi.*.newVideoFrame.?(&format, 1920 * 1088 * 3, 1, null, core);
+        var prog_frame = vsapi.*.newVideoFrame.?(&format, 1920 * 1088 * 3, 1, null, core);
 
         data.* = FullFilterData.init(dvd_r.?, reader.reader, vi, psidx, goplookup, .{
             .guess_ar = true,
@@ -320,18 +322,25 @@ pub const FullFilter = struct {
             {
                 var rff_ptr = vsapi.*.getWritePtr.?(rff_frame, 0);
                 var tff_ptr = vsapi.*.getWritePtr.?(tff_frame, 0);
+                var prog_ptr = vsapi.*.getWritePtr.?(prog_frame, 0);
+                var progseq_ptr = vsapi.*.getWritePtr.?(progseq_frame, 0);
+
                 var frame_cnt: u64 = 0;
                 for (goplookup.gops.items) |gp| {
                     var offset = frame_cnt;
                     for (0..gp.frame_cnt) |i| {
                         rff_ptr[8 + offset + gp.frames[i].temporal_reference] = @intFromBool(gp.frames[i].repeat);
                         tff_ptr[8 + offset + gp.frames[i].temporal_reference] = @intFromBool(gp.frames[i].tff);
+                        prog_ptr[8 + offset + gp.frames[i].temporal_reference] = @intFromBool(gp.frames[i].progressive);
+                        progseq_ptr[8 + offset + gp.frames[i].temporal_reference] = @intFromBool(gp.prog_sequence);
                         frame_cnt += 1;
                     }
                 }
 
                 std.mem.writeIntSliceLittle(u64, rff_ptr[0..8], frame_cnt);
                 std.mem.writeIntSliceLittle(u64, tff_ptr[0..8], frame_cnt);
+                std.mem.writeIntSliceLittle(u64, prog_ptr[0..8], frame_cnt);
+                std.mem.writeIntSliceLittle(u64, progseq_ptr[0..8], frame_cnt);
             }
         }
 
@@ -361,6 +370,14 @@ pub const FullFilter = struct {
         data.*.randy.extra_data_frames[5] = .{
             .name = "_TffFrame",
             .frame = tff_frame,
+        };
+        data.*.randy.extra_data_frames[6] = .{
+            .name = "_ProgFrame",
+            .frame = prog_frame,
+        };
+        data.*.randy.extra_data_frames[7] = .{
+            .name = "_ProgSeqFrame",
+            .frame = progseq_frame,
         };
 
         data.*.randy.seq = seq;

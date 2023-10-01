@@ -24,7 +24,7 @@ class ADT:
         cells = self.inner[vobid]
         ret = []
         for sectors in cells:
-            ret += self.get_sector_list_vobidcellid(sectors)
+            ret += self.get_sector_list_vobidcellid(vobid,sectors)
         return ret
     
     def get_sector_list_vobidcellid(self,vobid: int,cellid: int) -> List[int]:
@@ -107,6 +107,9 @@ class DVDSRCM2vInfoExtracter:
         self.vobid = [ ((x & 0xFFFF00)>>8,x & 0xFF) for x in self.vobid_raw ]
         self.rff = DVDSRCM2vInfoExtracter.__extract_binary_from_prps(self.frame0.props,"_RffFrame","B")
         self.tff = DVDSRCM2vInfoExtracter.__extract_binary_from_prps(self.frame0.props,"_TffFrame","B")
+        self.prog = DVDSRCM2vInfoExtracter.__extract_binary_from_prps(self.frame0.props,"_ProgFrame","B")
+        self.prog_seq = DVDSRCM2vInfoExtracter.__extract_binary_from_prps(self.frame0.props,"_ProgSeqFrame","B")
+        
 
 #        if len(self.framezz) > len(node):
 #            self.framezz = self.framezz[0:len(node)]
@@ -136,6 +139,8 @@ class DVDSRCM2vInfoExtracter:
                 cnt = sz // ss
 
                 framezz = struct.unpack(f"<{cnt}{datatype}",data[8:8 + sz])
+        else:
+            assert False
         return framezz
 
     def __extract_framezz(prps):

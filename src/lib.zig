@@ -9,6 +9,7 @@ const m2vfilter = @import("vs/m2vfilter.zig");
 const vobtofile = @import("vs/vobtofile.zig");
 const ac3filter = @import("vs/ac3filter.zig");
 const jsonfilter = @import("vs/jsonfilter.zig");
+const vobget = @import("vs/vobget.zig");
 const vobto = @import("vs/cutvob.zig");
 const rawac3 = @import("vs/rawac3.zig");
 
@@ -23,6 +24,7 @@ export fn VapourSynthPluginInit2(plugin: ?*vs.VSPlugin, vspapi: *const vs.VSPLUG
     _ = vspapi.registerFunction.?("FullAC3", "dvd:data;vts:int;domain:int;sectors:int[];audioidx:int", "clip:anode;", fullac3filter.FullAc3Filter.fullAc3FilterCreate, vs.NULL, plugin);
     _ = vspapi.registerFunction.?("FullLPCM", "dvd:data;vts:int;domain:int;sectors:int[];audioidx:int", "clip:anode;", fulllpcmfilter.FullLPCMFilter.fullLPCMFilterCreate, vs.NULL, plugin);
     _ = vspapi.registerFunction.?("RawAc3", "dvd:data;vts:int;domain:int;sectors:int[];audioidx:int", "clip:vnode;", rawac3.RawAc3Filter.rawAc3filterCreate, vs.NULL, plugin);
+    _ = vspapi.registerFunction.?("VobGet", "dvd:data;vts:int;domain:int;sectors:int[]", "clip:vnode;", vobget.VobGetFilter.VobGetfilterCreate, vs.NULL, plugin);
 
     _ = vspapi.registerFunction.?("M2V", "path:data", "clip:vnode;", m2vfilter.M2vFilter.filterCreate, vs.NULL, plugin);
     _ = vspapi.registerFunction.?("AC3", "path:data", "clip:anode;", ac3filter.Ac3Filter.ac3filterCreate, vs.NULL, plugin);

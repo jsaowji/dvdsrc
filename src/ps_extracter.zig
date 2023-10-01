@@ -3,6 +3,35 @@ const utils = @import("utils.zig");
 const dsi = @import("dsi.zig");
 const pci = @import("pci.zig");
 
+const PTS_FLAG: u8 = 0b0010;
+const PTSDTS_PTS_FLAG: u8 = 0b0011;
+const PTSDTS_DTS_FLAG: u8 = 0b0001;
+
+fn parse_pts(flag: u8, pts_bytesx: [5]u8) u32 {
+    const pts_bytes = [_]u32{
+        @as(u32, pts_bytesx[0]),
+        @as(u32, pts_bytesx[1]),
+        @as(u32, pts_bytesx[2]),
+        @as(u32, pts_bytesx[3]),
+        @as(u32, pts_bytesx[4]),
+    };
+    // 0010XXX1 XXXXXXXX XXXXXXX1 XXXXXXXX XXXXXXX1
+
+    std.debug.assert(((pts_bytes[0] & 0b11110000) >> 4) == flag);
+
+    std.debug.assert(((pts_bytes[0] & 0b00000001)) == 1);
+    std.debug.assert(((pts_bytes[2] & 0b00000001)) == 1);
+    std.debug.assert(((pts_bytes[4] & 0b00000001)) == 1);
+
+    const p0 = (pts_bytes[0] & 0b1110) >> 1;
+    const p1 = (pts_bytes[1] << 8) + (pts_bytes[2] & 0b11111110) >> 1;
+    const p2 = (pts_bytes[3] << 8) + (pts_bytes[4] & 0b11111110) >> 1;
+
+    const pts = p2 + (p1 << 15) + (p0 << 30);
+
+    return pts;
+}
+
 pub const DummyWriteout = struct {
     const Self = @This();
 
@@ -165,7 +194,32 @@ pub fn PsExtracter(comptime AllocatorType: anytype) type {
                     const hdr_data_len = self.buf[2];
                     const inner_data = self.buf[3 + hdr_data_len .. len];
 
+                    const pts_dts_ind = (self.buf[1] & 0b11000000) >> 6;
+
+                    var pts: ?u32 = null;
+                    var dts: ?u32 = null;
+
+                    if (pts_dts_ind == 0b00) {
+                        //nothing
+                    } else if (pts_dts_ind == 0b10) {
+                        //pts only
+                        const pts_bytesx = self.buf[3 .. 3 + 5];
+                        pts = parse_pts(PTS_FLAG, pts_bytesx.*);
+                    } else if (pts_dts_ind == 0b11) {
+                        //pts dts
+
+                        const pts_bytesx = self.buf[3 .. 3 + 5];
+                        const dts_bytesx = self.buf[3 + 5 .. 3 + 5 + 5];
+                        pts = parse_pts(PTSDTS_PTS_FLAG, pts_bytesx.*);
+                        dts = parse_pts(PTSDTS_PTS_FLAG, dts_bytesx.*);
+                    } else {
+                        unreachable;
+                    }
+
                     // std.debug.print("framecnt {} \n", .{inner_data[1]});
+
+                    //const framecnt = inner_data[1];
+                    //                    const first_acc_unit = (@as(u16, inner_data[2]) << 8) + inner_data[3];
 
                     const inner_id = inner_data[0];
                     if (inner_id >= 0x80 and inner_id <= 0x87) {
@@ -196,6 +250,7 @@ pub fn PsExtracter(comptime AllocatorType: anytype) type {
                     }
                     const data_read = try read_in.readAtLeast(self.buf[0..len], len);
                     std.debug.assert(data_read == len);
+
                     const hdr_data_len = self.buf[2];
                     const mpeg2_data = self.buf[3 + hdr_data_len .. len];
 

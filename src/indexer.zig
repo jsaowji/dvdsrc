@@ -99,6 +99,8 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
         mpeg2_file_pos: u64,
         slice_cnt: u8,
         first_sequence: ?mpeg2.mpeg2_sequence_t,
+        current_sequence: ?mpeg2.mpeg2_sequence_t,
+
         mpeg2_last_non_buffer: u64,
         gop_buf: GopBufWriter,
 
@@ -116,6 +118,7 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                 .mpeg2_file_pos = 0,
                 .slice_cnt = 0,
                 .first_sequence = null,
+                .current_sequence = null,
                 .mpeg2_last_non_buffer = 0,
                 .total_framecnt = 0,
                 .total_piccnt = 0,
@@ -239,6 +242,7 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                         }
 
                         current_gop.closed = (gop.flags & mpeg2.GOP_FLAG_CLOSED_GOP) != 0;
+                        current_gop.prog_sequence = (self.current_sequence.?.flags & mpeg2.SEQ_FLAG_PROGRESSIVE_SEQUENCE) != 0;
                         current_gop.frame_cnt = 0;
                         current_gop.indexing_only_slicecnt = 0;
                         current_gop.frames = undefined;
@@ -251,6 +255,7 @@ fn M2vIndexer(comptime GopBufWriter: type) type {
                     },
                     mpeg2.STATE_SEQUENCE, mpeg2.STATE_SEQUENCE_MODIFIED, mpeg2.STATE_SEQUENCE_REPEATED => {
                         //TODO: check if sequence was acually modiefied or only useless shit like maxBps
+                        self.current_sequence = info.sequence.*;
                     },
                     mpeg2.STATE_BUFFER => {
                         break;

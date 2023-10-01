@@ -47,7 +47,7 @@ pub const IndexManager = struct {
         var basename = std.fs.path.basename(ii.path);
         var hash = std.hash.Crc32.init();
 
-        std.hash.autoHashStrat(&hash, "version2", .Deep);
+        std.hash.autoHashStrat(&hash, "version3", .Deep);
         std.hash.autoHashStrat(&hash, ii.path, .Deep);
         const finalhash = hash.final();
 

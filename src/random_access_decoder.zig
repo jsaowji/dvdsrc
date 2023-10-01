@@ -21,7 +21,7 @@ pub fn RandomAccessDecoder(comptime M2vReaderType: type) type {
 
         video_info: vs.VSVideoInfo,
 
-        extra_data_frames: [6]?struct {
+        extra_data_frames: [8]?struct {
             name: [*:0]const u8,
             frame: ?*vs.VSFrame,
         },
