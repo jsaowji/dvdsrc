@@ -1,18 +1,6 @@
 # Vapoursynth dvd source
-namespace and api not final
-WIP
 
-# support 
-
-## video:
-- mpeg1: ?
-- mpeg2: Y (NTCS and PAL should work)
-
-## audio: (not much tested, especally non stereo)
-- ac3: Y
-- lpcm: Y
-- other: not yet
-
+deprecated use dvdsrc2 with vs-source instead.
 
 ## Usage examples
 ```
